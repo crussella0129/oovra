@@ -2,7 +2,7 @@
 
 > *"To be made in the image of the Creator is to be a creator of very good things yourself."*
 >
-An **œuvre** is a body of work — the collected output of a maker. Oovra, the tool, treats system prompts as composed works: assembled from named, versioned policy nodes that form your personal corpus. Each prompt you ship is an entry in your œuvre.
+An **œuvre** is a body of work — the collected output of a maker. Oovra, the tool, treats system prompts as atomically composed works: assembled from named, versioned policy nodes that form your personal corpus. Each prompt you ship is an entry in your œuvre (but we spelled it Oovra for obvious reasons).
 
 A step-by-step prose guide for building Oovra, a system-prompt composer in Rust. Oovra operates on Markdown policy nodes, emits JSON composition documents, renders to Markdown, and diffs structurally with version awareness.
 
