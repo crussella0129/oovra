@@ -1,4 +1,4 @@
-# Ouvre Build Guide
+# Oovra Build Guide
 
 > *"To be made in the image of the Creator is to be a creator of very good things yourself."*
 >
