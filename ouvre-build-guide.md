@@ -2,9 +2,9 @@
 
 > *"To be made in the image of the Creator is to be a creator of very good things yourself."*
 >
-> An **œuvre** is a body of work — the collected output of a maker. Ouvre, the tool, treats system prompts as composed works: assembled from named, versioned policy nodes that form your personal corpus. Each prompt you ship is an entry in your œuvre.
+> An **œuvre** is a body of work — the collected output of a maker. Oovra, the tool, treats system prompts as composed works: assembled from named, versioned policy nodes that form your personal corpus. Each prompt you ship is an entry in your œuvre.
 
-A step-by-step prose guide for building Ouvre, a system-prompt composer in Rust. Ouvre operates on Markdown policy nodes, emits JSON composition documents, renders to Markdown, and diffs structurally with version awareness.
+A step-by-step prose guide for building Oovra, a system-prompt composer in Rust. Oovra operates on Markdown policy nodes, emits JSON composition documents, renders to Markdown, and diffs structurally with version awareness.
 
 The build guide is deliberately written in prose, not code. Every step describes *what to do* and *why* — the syntax is left for the compiler and the documentation to teach. This is a learn-by-doing artifact for the [[Architect/Builder Gap]] problem.
 
@@ -77,7 +77,7 @@ A composition document references nodes by ID and pins versions. A complete poli
 
 #### Step 1.3 — Scaffold the Rust project
 
-Create a new Cargo project. Use `cargo new ouvre` with the binary template — for v0.1 a standalone binary is fine, and you can refactor into a library-plus-binary or a workspace later if Ouvre grows. Add the dependencies from Part 1 to your `Cargo.toml`: serde with the derive feature, serde_json, gray_matter, toml, walkdir, clap with the derive feature, anyhow, and semver. Do not add `similar` or `indexmap` yet; you do not need them for Stage 1.
+Create a new Cargo project. Use `cargo new Oovra` with the binary template — for v0.1 a standalone binary is fine, and you can refactor into a library-plus-binary or a workspace later if Oovra grows. Add the dependencies from Part 1 to your `Cargo.toml`: serde with the derive feature, serde_json, gray_matter, toml, walkdir, clap with the derive feature, anyhow, and semver. Do not add `similar` or `indexmap` yet; you do not need them for Stage 1.
 
 Inside the `src` directory, plan a module layout on paper before creating files. A reasonable layout: a `node` module for the policy node type and its parser, a `composition` module for the composition document type, a `library` module for loading nodes from disk, a `render` module for the string generator, a `diff` module for Stage 3, and `main.rs` for the CLI entry point. Each module gets its own file. This is the conventional Rust layout; deviating from it earns you nothing.
 
@@ -238,4 +238,4 @@ The Rust type system enforces that you cannot accidentally mix the three concern
 - TUI for browsing the library with `ratatui` (good Rust learning project).
 - Library-wide audits: "which nodes are unused across all my compositions?" "which nodes are used in 80%+ of compositions and should perhaps be a default?"
 - Round-trip parsing of arbitrary existing prompts back into nodes (the hard SPLIT direction — heuristic-based).
-- Optional integration with [[Carbide]]'s string operators if you want Ouvre to share a JOIN/SPLIT/UNION primitive layer with your other Rust string tooling — useful if you find yourself reimplementing the same algebra in two places.
+- Optional integration with [[Carbide]]'s string operators if you want Oovra to share a JOIN/SPLIT/UNION primitive layer with your other Rust string tooling — useful if you find yourself reimplementing the same algebra in two places.
