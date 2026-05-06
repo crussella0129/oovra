@@ -1,26 +1,3 @@
----
-title: "Ouvre Build Guide"
-project: "[[Ouvre]]"
-related:
-  - "[[Carbide]]"
-  - "[[Cellpiler]]"
-  - "[[Claude Thoughts Vault]]"
-  - "[[Policy Node Composer]]"
-  - "[[String Operators sheet]]"
-tags:
-  - rust
-  - prompt-engineering
-  - composer
-  - architecture
-  - build-guide
-  - ouvre
-status: spec
-version: 0.1
-author: Charles Russell
-audience: self
-created: 2026-05-06
----
-
 # Ouvre Build Guide
 
 > *"To be made in the image of the Creator is to be a creator of very good things yourself."*
