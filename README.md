@@ -109,6 +109,10 @@ The body delimiter for a level-`N` composed element is `(N+1)`-tildes + `>>` to 
 
 See [SCHEMA.md](./SCHEMA.md) for the full schema.
 
+## Examples
+
+[`oovra-by-example/`](./oovra-by-example/) is a curated suite of five end-to-end demos showing the tool in action. Each demo has a `notes.md` (what's being demonstrated and why it matters architecturally) and a `results.md` (captured outputs and verdicts) — together they cover lossless decomposition, the prose-form renderer, deep recursive flattening, structural diff, and the mixed-order delimiter-escalation case. Browse [`oovra-by-example/README.md`](./oovra-by-example/README.md) for the index.
+
 ## Why TOML, not YAML or JSON
 
 Three reasons, in order:

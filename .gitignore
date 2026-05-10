@@ -20,5 +20,6 @@ target
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# Demo artifacts produced by manual end-to-end runs
+# Ad-hoc demo artifacts produced by manual end-to-end runs (the curated
+# example suite lives at /oovra-by-example/ and IS tracked in git)
 /demo/
