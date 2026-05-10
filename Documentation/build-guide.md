@@ -259,6 +259,9 @@ pub struct PromptElementHeader {
     pub render_mode: Option<String>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_level: Option<u32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composed_of: Option<Vec<InputRef>>,
 }
 ```
@@ -266,7 +269,7 @@ pub struct PromptElementHeader {
 Two important serde annotations:
 
 - `#[serde(default)]` on `meta` lets the field be omitted from TOML and still deserialize (using `String::default()`, i.e. `""`). Without this, an order-0 file missing `meta` would fail to parse.
-- `#[serde(default, skip_serializing_if = "Option::is_none")]` on the optional fields means: deserialize as `None` when missing, and *omit entirely* when serializing if `None`. Without `skip_serializing_if`, serde would emit them as TOML `null` (which TOML doesn't have, so it'd error).
+- `#[serde(default, skip_serializing_if = "Option::is_none")]` on all four conditional fields means: deserialize as `None` when missing, and *omit entirely* when serializing if `None`. Without `skip_serializing_if`, serde would emit them as TOML `null` (which TOML doesn't have, so it'd error).
 
 > ★ **Insight — Why `Option<T>` with `skip_serializing_if`.** This pattern is how you express "this field exists for some elements and not others" in a single struct without resorting to a tagged enum. The runtime validator (Step 1.6) enforces the joint invariant "`composed_of.is_some()` implies all four companion fields are present, otherwise all are absent and `order == 0`" — the type system can't express it directly, but the validator covers it before the struct is handed to anyone.
 
@@ -295,26 +298,31 @@ The split is purely lexical:
 pub fn split_frontmatter(content: &str, path: &Path) -> Result<(String, String)> {
     let mut lines = content.lines();
 
-    // Line 1 must be "+++"
-    match lines.next() {
-        Some(l) if l.trim_end() == "+++" => {}
-        Some(l) => return Err(OovraError::MissingOpenDelimiter {
-            path: path.to_path_buf(),
-            actual: l.to_string(),
-        }),
+    let first = lines.next();
+    match first {
+        Some(line) if line.trim_end() == "+++" => {}
+        Some(line) => {
+            return Err(OovraError::MissingOpenDelimiter {
+                path: path.to_path_buf(),
+                actual: line.to_string(),
+            });
+        }
         None => return Err(OovraError::EmptyFile(path.to_path_buf())),
     }
 
-    let mut fm: Vec<&str> = Vec::new();
-    let mut body: Vec<&str> = Vec::new();
+    let mut fm_lines: Vec<&str> = Vec::new();
+    let mut body_lines: Vec<&str> = Vec::new();
     let mut closed = false;
 
     for line in lines {
         if !closed {
-            if line.trim_end() == "+++" { closed = true; }
-            else { fm.push(line); }
+            if line.trim_end() == "+++" {
+                closed = true;
+            } else {
+                fm_lines.push(line);
+            }
         } else {
-            body.push(line);
+            body_lines.push(line);
         }
     }
 
@@ -322,10 +330,17 @@ pub fn split_frontmatter(content: &str, path: &Path) -> Result<(String, String)>
         return Err(OovraError::MissingCloseDelimiter(path.to_path_buf()));
     }
 
-    // Skip exactly one blank line between close-delimiter and body
-    let start = if body.first().map(|l| l.trim().is_empty()).unwrap_or(false) { 1 } else { 0 };
+    // Consume exactly one blank line after the closing delimiter, if present.
+    let body_start = if body_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
+        1
+    } else {
+        0
+    };
 
-    Ok((fm.join("\n"), body[start..].join("\n")))
+    let body = body_lines[body_start..].join("\n");
+    let frontmatter = fm_lines.join("\n");
+
+    Ok((frontmatter, body))
 }
 ```
 
@@ -356,6 +371,11 @@ fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Res
 
     // Lexical: version must be semver
     if !is_valid_semver(&header.version) {
+        return Err(OovraError::InvalidField { /* ... */ });
+    }
+
+    // Name must be non-empty after trim
+    if header.name.trim().is_empty() {
         return Err(OovraError::InvalidField { /* ... */ });
     }
 
@@ -402,11 +422,17 @@ The three validators are tiny:
 
 ```rust
 pub fn is_kebab_case(s: &str) -> bool {
-    !s.is_empty()
-        && !s.starts_with('-')
-        && !s.ends_with('-')
-        && !s.contains("--")
-        && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    if s.is_empty() {
+        return false;
+    }
+    if s.starts_with('-') || s.ends_with('-') {
+        return false;
+    }
+    if s.contains("--") {
+        return false;
+    }
+    s.chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 pub fn is_valid_semver(s: &str) -> bool {
@@ -428,13 +454,14 @@ The inverse:
 
 ```rust
 pub fn serialize(element: &PromptElement) -> Result<String> {
-    let toml_string = toml::to_string_pretty(&element.header)
-        .map_err(|source| OovraError::TomlSerialize {
+    let toml_string =
+        toml::to_string_pretty(&element.header).map_err(|source| OovraError::TomlSerialize {
             id: element.header.id.clone(),
             source,
         })?;
-    let body = element.body.trim_end_matches('\n');
-    Ok(format!("+++\n{toml_string}+++\n\n{body}\n"))
+
+    let body_trimmed = element.body.trim_end_matches('\n');
+    Ok(format!("+++\n{toml_string}+++\n\n{body_trimmed}\n"))
 }
 ```
 
@@ -449,16 +476,22 @@ Always pair `serialize` (pure, returns a String) with a separate `write` functio
 ```rust
 pub fn write(element: &PromptElement, path: &Path) -> Result<()> {
     let content = serialize(element)?;
-    // Validate IN MEMORY by parsing the would-be content. If this fails,
-    // nothing has touched disk yet — no orphan file is left behind.
+    // Validate first by parsing the in-memory string. If this fails,
+    // nothing is touched on disk.
     let _ = parse(&content, path)?;
 
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|s| OovraError::WriteIo { path: parent.to_path_buf(), source: s })?;
+            fs::create_dir_all(parent).map_err(|source| OovraError::WriteIo {
+                path: parent.to_path_buf(),
+                source,
+            })?;
         }
     }
-    fs::write(path, &content).map_err(|s| OovraError::WriteIo { path: path.to_path_buf(), source: s })?;
+    fs::write(path, &content).map_err(|source| OovraError::WriteIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
     parse_file(path)?;  // Paranoia: re-read from disk, in case of FS-level corruption
     Ok(())
 }
@@ -556,7 +589,7 @@ pub fn scaffold(args: ScaffoldArgs) -> Result<PathBuf> {
 }
 ```
 
-Both modes always produce `order = 0` with no recipe (`composed_of: None`). There is no way to scaffold a higher-order element by hand — that's `compose`'s job. This is a deliberate constraint: the validator (Step 1.6) actively rejects any hand-authored file claiming `order > 0` without a recipe (`HandAuthoredHigherOrder` error). Note the seven Optional companion fields on the header are *all* `None` here — the validator rejects any subset being `Some` for an atomic element, keeping the schema rectangular.
+Both modes always produce `order = 0` with no recipe (`composed_of: None`). There is no way to scaffold a higher-order element by hand — that's `compose`'s job. This is a deliberate constraint: the validator (Step 1.6) actively rejects any hand-authored file claiming `order > 0` without a recipe (`HandAuthoredHigherOrder` error). Note the four `Option<T>` companion fields on the header (`generated_at`, `render_mode`, `body_level`, `composed_of`) are *all* `None` here — the validator rejects any subset being `Some` for an atomic element, keeping the schema rectangular.
 
 The original spec said Create should "delete the file on failure to parse." The shipped implementation goes one step better: it validates the would-be file content *in memory* before any `fs::write` happens, so a failure leaves nothing on disk to clean up. The original "delete on failure" approach has a TOCTOU window between write and delete; the in-memory pre-check has none.
 
@@ -617,14 +650,20 @@ This is the most distinctive part of Oovra:
 
 ```rust
 pub fn compute_order(orders: &[u32]) -> u32 {
-    if orders.is_empty() { return 0; }
+    if orders.is_empty() {
+        return 0;
+    }
     let highest = orders.iter().copied().max().unwrap_or(0);
     let count_at_highest = orders.iter().filter(|&&o| o == highest).count();
-    if count_at_highest > 1 { highest + 1 } else { highest }
+    if count_at_highest > 1 {
+        highest + 1
+    } else {
+        highest
+    }
 }
 ```
 
-Five lines. They encode the rule: **you only climb to a higher order when at least two inputs are peers at the maximum input order.** This means:
+They encode the rule: **you only climb to a higher order when at least two inputs are peers at the maximum input order.** This means:
 
 - `compute_order(&[0, 0, 0])` = 1 — three peers at order 0, climb
 - `compute_order(&[1, 1])` = 2 — two peers at order 1, climb
@@ -764,9 +803,18 @@ Decompose is the inverse, and it's almost trivial because the body is already st
 ```rust
 pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
     if element.header.is_atomic() {
-        return Err(OovraError::CannotDecomposeAtomic { id: element.header.id.clone() });
+        return Err(OovraError::CannotDecomposeAtomic {
+            id: element.header.id.clone(),
+        });
     }
-    let body_level = element.header.body_level.expect("composed implies body_level");
+
+    let body_level = element.header.body_level.ok_or_else(|| {
+        OovraError::OrderRequiresField {
+            id: element.header.id.clone(),
+            order: element.header.order,
+            field: "body_level",
+        }
+    })?;
 
     let open = body_delimiter_open(body_level);
     let close = body_delimiter_close(body_level);
@@ -777,15 +825,21 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
     for line in element.body.lines() {
         let trimmed = line.trim_end();
         if trimmed == open {
+            if current.is_some() {
+                return Err(OovraError::BodyParse { /* unmatched-open arm */ });
+            }
             current = Some(Vec::new());
         } else if trimmed == close {
-            if let Some(buf) = current.take() {
-                chunks.push(buf.join("\n"));
+            match current.take() {
+                Some(buf) => chunks.push(buf.join("\n")),
+                None => return Err(OovraError::BodyParse { /* unmatched-close arm */ }),
             }
         } else if let Some(buf) = current.as_mut() {
             buf.push(line);
         }
     }
+
+    // ... plus two more BodyParse arms: missing final close, no opens found at all.
 
     // Parse each chunk as a complete Oovra file
     let mut parsed: Vec<PromptElement> = Vec::with_capacity(chunks.len());
@@ -796,7 +850,7 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
 }
 ```
 
-The state machine: walk the body line by line. When you see an open delimiter, start collecting. When you see a close, finalize the chunk. Otherwise, append to the current chunk if you're inside one.
+The state machine: walk the body line by line. When you see an open delimiter, start collecting. When you see a close, finalize the chunk. Otherwise, append to the current chunk if you're inside one. The `BodyParse` arms (sketched as `/* ... arm */` above) cover the four ways a body can be malformed: open-while-open, close-without-open, missing-final-close, and zero-opens — see `src/decompose.rs` for the full text of each error message.
 
 `decompose --full` is recursive:
 
@@ -1069,7 +1123,7 @@ oovra/
     └── end_to_end.rs      # 11 integration tests covering the full pipeline
 ```
 
-Total: roughly 1,500 lines of Rust + 250 lines of test + 5 small Markdown files. The codebase fits in one head.
+Total: roughly 2,000 lines of Rust + 450 lines of integration test + 5 small Markdown sample elements. The codebase fits in one head. (Exact counts as of this snapshot: 2,062 src lines, 466 test lines.)
 
 ## Appendix B — Test Strategy
 
