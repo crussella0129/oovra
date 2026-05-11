@@ -11,7 +11,7 @@ A Rust based, Obsidian compatible tool for the **composition** and **comparison*
 
 Oovra is built around **one file format** — Markdown with TOML frontmatter — and **one numeric discriminator**: an `order` field.
 
-- An **order-0 element** is atomic — a hand-authored sentence or paragraph that holds together on its own.
+- An **order-0 element** is atomic — a hand-authored sentence or paragraph representing a primitive prompt element, such as a basic rule, instruction, policy, or context providing statement.
 - An **order-1 element** is a composition of order-0 elements, produced by `oovra compose`.
 - An **order-N element** is what you get when you compose elements that include at least two peers at order N−1. Order encodes compositional depth.
 
