@@ -1,4 +1,7 @@
-# Oovra
+<p align="center">
+  <img src="oovra_slate" alt=oovra_slate_logo Logo width=50% height =50% />
+</p>
+<p align="center"> # Oovra </p>
 
 A Rust tool for the **composition** and **comparison** of agentic system prompts from Markdown+TOML "prompt elements."
 
