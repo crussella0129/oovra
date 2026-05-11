@@ -97,7 +97,13 @@ Documentation/
 │   ├── 04-structural-diff/             ← compare cuts through surface byte noise
 │   └── 05-mixed-order-regression/      ← the body_level escalation fix
 │
-└── build-guide.md                       ← from-first-principles Rust construction guide
+├── build-guide.md                       ← from-first-principles Rust construction guide
+│
+└── v0.1/                                ← version-specific artifacts (planning, assessments)
+    └── version reports/                 ← three reports written during v0.1
+        ├── v0.2-scoping.md              ← scope contract for the v0.2 release
+        ├── oovra-server-feasibility.md  ← design exercise for a network service
+        └── v0.1-efficacy-rating.md      ← honest assessment of v0.1 as a shipped tool
 ```
 
-All cross-links between these files have been verified to resolve. The reference, demos, and build guide reinforce each other — refer back-and-forth as you read.
+All cross-links between these files have been verified to resolve. The reference, demos, and build guide describe the **current** state of the tool; the `v0.1/` folder holds **historical** planning artifacts that snapshot what was being considered when v0.1 was the shipping version.
