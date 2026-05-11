@@ -1,7 +1,7 @@
 <p align="center">
   <img src="oovra_slate.png" alt=oovra_slate_logo Logo width=50% height =50% />
 </p>
-<p align="center">Oovra</h1> </p>
+<h1 align="center">Oovra</h1> </p>
 
 A Rust tool for the **composition** and **comparison** of agentic system prompts from Markdown+TOML "prompt elements."
 
