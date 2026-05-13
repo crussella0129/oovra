@@ -20,7 +20,9 @@ pub mod header;
 pub mod library;
 pub mod render;
 
-pub use element::{parse, parse_file, serialize, write, PromptElement};
+pub use element::{
+    parse, parse_file, parse_file_with, parse_with, serialize, write, ParseOptions, PromptElement,
+};
 pub use error::{OovraError, Result};
-pub use header::{InputRef, PromptElementHeader};
+pub use header::{InputRef, LegacyHeader, PromptElementHeader, PromptElementKind};
 pub use library::Library;

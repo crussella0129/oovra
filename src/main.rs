@@ -15,13 +15,19 @@ use owo_colors::OwoColorize;
 use oovra::create::{label, scaffold, LabelArgs, ScaffoldArgs};
 use oovra::decompose::{decompose_full, report};
 use oovra::diff::{compare, DiffReport};
-use oovra::element::{parse_file, serialize, write, PromptElement};
+use oovra::element::{parse_file_with, serialize, write, ParseOptions, PromptElement};
 use oovra::library::Library;
 use oovra::render::{compose, render_text, ComposeRequest};
 
 #[derive(Parser, Debug)]
 #[command(name = "oovra", version, about = "Compose and compare agentic prompt elements (Markdown + TOML).", long_about = None)]
 struct Cli {
+    /// Accept v0.1 legacy schema files (with `order` instead of `kind`).
+    /// Read-only ergonomics during the v0.2 transition; writes are always
+    /// in v0.2 format. Removed in v0.3.
+    #[arg(long, global = true)]
+    legacy: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -146,11 +152,12 @@ struct CompareArgs {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    let opts = ParseOptions { legacy: cli.legacy };
     match cli.command {
         Command::Create(args) => run_create(args),
-        Command::Compose(args) => run_compose(args),
-        Command::Decompose(args) => run_decompose(args),
-        Command::Compare(args) => run_compare(args),
+        Command::Compose(args) => run_compose(args, opts),
+        Command::Decompose(args) => run_decompose(args, opts),
+        Command::Compare(args) => run_compare(args, opts),
     }
 }
 
@@ -204,12 +211,12 @@ fn run_create(args: CreateArgs) -> anyhow::Result<()> {
     }
 }
 
-fn run_compose(args: ComposeArgs) -> anyhow::Result<()> {
-    let library = Library::load(&args.library)
+fn run_compose(args: ComposeArgs, opts: ParseOptions) -> anyhow::Result<()> {
+    let library = Library::load_with(&args.library, opts)
         .with_context(|| format!("loading library from {}", args.library.display()))?;
 
     if let Some(re_render_path) = args.re_render {
-        let existing = parse_file(&re_render_path)
+        let existing = parse_file_with(&re_render_path, opts)
             .with_context(|| format!("reading re-render target {}", re_render_path.display()))?;
         let composed_of = existing
             .header
@@ -293,8 +300,8 @@ fn run_compose(args: ComposeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_decompose(args: DecomposeArgs) -> anyhow::Result<()> {
-    let element = parse_file(&args.path)
+fn run_decompose(args: DecomposeArgs, opts: ParseOptions) -> anyhow::Result<()> {
+    let element = parse_file_with(&args.path, opts)
         .with_context(|| format!("reading {}", args.path.display()))?;
 
     if args.full {
@@ -339,9 +346,11 @@ fn run_decompose(args: DecomposeArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
-    let a = parse_file(&args.a).with_context(|| format!("reading {}", args.a.display()))?;
-    let b = parse_file(&args.b).with_context(|| format!("reading {}", args.b.display()))?;
+fn run_compare(args: CompareArgs, opts: ParseOptions) -> anyhow::Result<()> {
+    let a = parse_file_with(&args.a, opts)
+        .with_context(|| format!("reading {}", args.a.display()))?;
+    let b = parse_file_with(&args.b, opts)
+        .with_context(|| format!("reading {}", args.b.display()))?;
     let report = compare(&a, &b)?;
 
     if args.format == "json" {

@@ -120,6 +120,68 @@ impl PromptElementHeader {
     }
 }
 
+/// v0.1 frontmatter shape, kept around as a deserialization-only target for
+/// the `--legacy` and `oovra migrate` paths. Convert to v0.2 via
+/// [`LegacyHeader::into_v2`].
+///
+/// The `order` field is preserved on read so the mapping rules from
+/// SPEC §5.1 can be applied; v0.2 itself never reads or writes this struct.
+#[derive(Debug, Deserialize)]
+pub struct LegacyHeader {
+    pub name: String,
+    pub order: u32,
+    pub id: String,
+    pub version: String,
+    #[serde(default)]
+    pub meta: String,
+    #[serde(default)]
+    pub generated_at: Option<String>,
+    #[serde(default)]
+    pub render_mode: Option<String>,
+    #[serde(default)]
+    pub body_level: Option<u32>,
+    #[serde(default)]
+    pub composed_of: Option<Vec<InputRef>>,
+}
+
+impl LegacyHeader {
+    /// Convert a v0.1 header to v0.2 per SPEC §5.1 mapping rules:
+    ///
+    /// - `order = 0`, no `composed_of`            → `kind = atom`
+    /// - any order, `composed_of` present         → `kind = compound`
+    /// - `order >= 1`, no `composed_of`           → rejected (v0.1 rejected
+    ///   this case too; preserving that behavior)
+    ///
+    /// `depth` is set equal to `body_level` (under v0.2 semantics the two
+    /// numbers coincide for every valid compound — see `compute_depth`).
+    pub fn into_v2(self) -> Result<PromptElementHeader, String> {
+        let kind = match (self.order, self.composed_of.is_some()) {
+            (_, true) => PromptElementKind::Compound,
+            (0, false) => PromptElementKind::Atom,
+            (n, false) => {
+                return Err(format!(
+                    "legacy element '{}' has order = {} but no composed_of; \
+                     v0.1 already rejected this case, so it cannot be migrated.",
+                    self.id, n
+                ));
+            }
+        };
+        let depth = self.body_level;
+        Ok(PromptElementHeader {
+            name: self.name,
+            kind,
+            id: self.id,
+            version: self.version,
+            meta: self.meta,
+            generated_at: self.generated_at,
+            render_mode: self.render_mode,
+            body_level: self.body_level,
+            depth,
+            composed_of: self.composed_of,
+        })
+    }
+}
+
 /// Validate kebab-case: lowercase letters, digits, and hyphens only;
 /// no leading/trailing hyphen; no double-hyphen.
 pub fn is_kebab_case(s: &str) -> bool {

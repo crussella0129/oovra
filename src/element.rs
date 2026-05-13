@@ -29,8 +29,19 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{OovraError, Result};
 use crate::header::{
-    is_kebab_case, is_valid_rfc3339, is_valid_semver, PromptElementHeader, PromptElementKind,
+    is_kebab_case, is_valid_rfc3339, is_valid_semver, LegacyHeader, PromptElementHeader,
+    PromptElementKind,
 };
+
+/// Options affecting how a file is parsed. The only knob today is the
+/// transitional `--legacy` mode that accepts v0.1's `order`-based schema.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ParseOptions {
+    /// When true, files lacking the v0.2 `kind` field are retried against
+    /// the v0.1 `LegacyHeader` and converted to v0.2 in memory. Writes are
+    /// always in v0.2 format regardless of this flag.
+    pub legacy: bool,
+}
 
 /// In-memory representation of one Oovra file.
 #[derive(Debug, Clone)]
@@ -121,15 +132,47 @@ pub fn split_frontmatter(content: &str, path: &Path) -> Result<(String, String)>
     Ok((frontmatter, body))
 }
 
-/// Parse a complete Oovra file from a string. Validates the header semantics.
+/// Parse a complete Oovra file from a string in default (v0.2-only) mode.
+/// Validates the header semantics.
 pub fn parse(content: &str, path: &Path) -> Result<PromptElement> {
+    parse_with(content, path, ParseOptions::default())
+}
+
+/// Read and parse a file from disk in default (v0.2-only) mode.
+pub fn parse_file(path: &Path) -> Result<PromptElement> {
+    parse_file_with(path, ParseOptions::default())
+}
+
+/// Parse a complete Oovra file from a string with explicit options. When
+/// `opts.legacy` is true, files that fail v0.2 deserialization due to a
+/// missing `kind` field are retried as v0.1 `LegacyHeader` and converted
+/// in memory. Writes are always in v0.2 format.
+pub fn parse_with(content: &str, path: &Path, opts: ParseOptions) -> Result<PromptElement> {
     let (fm_str, body) = split_frontmatter(content, path)?;
 
-    let header: PromptElementHeader =
-        toml::from_str(&fm_str).map_err(|source| OovraError::InvalidToml {
-            path: path.to_path_buf(),
-            source,
-        })?;
+    let header: PromptElementHeader = match toml::from_str(&fm_str) {
+        Ok(h) => h,
+        Err(v2_err) => {
+            if opts.legacy && looks_like_missing_kind(&v2_err) {
+                let legacy: LegacyHeader =
+                    toml::from_str(&fm_str).map_err(|source| OovraError::InvalidToml {
+                        path: path.to_path_buf(),
+                        source,
+                    })?;
+                legacy.into_v2().map_err(|reason| OovraError::InvalidField {
+                    path: path.to_path_buf(),
+                    field: "order",
+                    value: "<legacy>".to_string(),
+                    reason,
+                })?
+            } else {
+                return Err(OovraError::InvalidToml {
+                    path: path.to_path_buf(),
+                    source: v2_err,
+                });
+            }
+        }
+    };
 
     validate_header(&header, &body, path)?;
 
@@ -140,8 +183,8 @@ pub fn parse(content: &str, path: &Path) -> Result<PromptElement> {
     })
 }
 
-/// Read and parse a file from disk.
-pub fn parse_file(path: &Path) -> Result<PromptElement> {
+/// Read and parse a file from disk with explicit options.
+pub fn parse_file_with(path: &Path, opts: ParseOptions) -> Result<PromptElement> {
     if !path.exists() {
         return Err(OovraError::FileNotFound(path.to_path_buf()));
     }
@@ -149,7 +192,14 @@ pub fn parse_file(path: &Path) -> Result<PromptElement> {
         path: path.to_path_buf(),
         source,
     })?;
-    parse(&content, path)
+    parse_with(&content, path, opts)
+}
+
+/// Heuristic: does this toml::de::Error look like "missing field `kind`"?
+/// Used to decide whether to fall back to the v0.1 LegacyHeader path.
+fn looks_like_missing_kind(err: &toml::de::Error) -> bool {
+    let msg = err.to_string();
+    msg.contains("missing field `kind`") || msg.contains("missing field \"kind\"")
 }
 
 fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Result<()> {
@@ -497,5 +547,43 @@ mod tests {
         let bare = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let err = parse(bare, Path::new("x.md")).unwrap_err();
         assert!(matches!(err, OovraError::CompoundMissingField { .. }));
+    }
+
+    #[test]
+    fn legacy_loader_maps_order_0_to_atom() {
+        // v0.2 SPEC §7.2 + §5.1: a v0.1 atom (order = 0, no composed_of)
+        // parsed in --legacy mode comes out as kind = "atom".
+        let content = "+++\nname = \"Test\"\norder = 0\nid = \"test\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let opts = ParseOptions { legacy: true };
+        let element = parse_with(content, Path::new("test.md"), opts).unwrap();
+        assert_eq!(element.header.kind, PromptElementKind::Atom);
+        assert_eq!(element.header.id, "test");
+        // Default (non-legacy) parse should reject the same content.
+        let err = parse(content, Path::new("test.md")).unwrap_err();
+        assert!(matches!(err, OovraError::InvalidToml { .. }));
+    }
+
+    #[test]
+    fn legacy_loader_maps_order_n_with_recipe_to_compound() {
+        // v0.2 SPEC §7.2 + §5.1: a v0.1 compound (order >= 1, composed_of set)
+        // parsed in --legacy mode comes out as kind = "compound", with
+        // body_level preserved and depth derived.
+        let content = "+++\nname = \"Compound\"\norder = 1\nid = \"compound\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\nbody_level = 1\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}, {id = \"b\", version = \"1.0.0\"}]\n+++\n\n~~>>\nstuff\n~~<<\n";
+        let opts = ParseOptions { legacy: true };
+        let element = parse_with(content, Path::new("compound.md"), opts).unwrap();
+        assert_eq!(element.header.kind, PromptElementKind::Compound);
+        assert_eq!(element.header.body_level, Some(1));
+        assert_eq!(element.header.depth, Some(1));
+        assert_eq!(element.header.composed_of.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn legacy_loader_rejects_order_n_without_composed_of() {
+        // SPEC §5.1 explicit case: order >= 1 with no composed_of was
+        // already rejected by v0.1, so migration cannot synthesize a kind.
+        let content = "+++\nname = \"Bad\"\norder = 1\nid = \"bad\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let opts = ParseOptions { legacy: true };
+        let err = parse_with(content, Path::new("bad.md"), opts).unwrap_err();
+        assert!(matches!(err, OovraError::InvalidField { field: "order", .. }));
     }
 }

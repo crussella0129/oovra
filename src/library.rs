@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::element::{parse_file, PromptElement};
+use crate::element::{parse_file_with, ParseOptions, PromptElement};
 use crate::error::{OovraError, Result};
 
 #[derive(Debug)]
@@ -19,9 +19,16 @@ pub struct Library {
 }
 
 impl Library {
-    /// Walk `root` recursively, parse every `.md` file, return a populated
-    /// library. Errors on duplicate IDs or any unparseable file.
+    /// Walk `root` recursively in default (v0.2-only) mode, parse every `.md`
+    /// file, return a populated library. Errors on duplicate IDs or any
+    /// unparseable file.
     pub fn load(root: &Path) -> Result<Self> {
+        Self::load_with(root, ParseOptions::default())
+    }
+
+    /// Same as [`Library::load`] but with explicit parse options. Use
+    /// `ParseOptions { legacy: true }` to accept v0.1 schema files.
+    pub fn load_with(root: &Path, opts: ParseOptions) -> Result<Self> {
         if !root.exists() {
             return Err(OovraError::FileNotFound(root.to_path_buf()));
         }
@@ -40,7 +47,7 @@ impl Library {
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            let element = parse_file(path)?;
+            let element = parse_file_with(path, opts)?;
             let id = element.header.id.clone();
 
             if let Some(existing) = id_to_path.get(&id) {
