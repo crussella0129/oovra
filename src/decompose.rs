@@ -40,9 +40,8 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
     }
 
     let body_level = element.header.body_level.ok_or_else(|| {
-        OovraError::OrderRequiresField {
-            id: element.header.id.clone(),
-            order: element.header.order,
+        OovraError::MissingField {
+            path: std::path::PathBuf::from(format!("<{}:embedded>", element.header.id)),
             field: "body_level",
         }
     })?;
@@ -59,7 +58,7 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
             if current.is_some() {
                 return Err(OovraError::BodyParse {
                     id: element.header.id.clone(),
-                    order: element.header.order,
+                    body_level,
                     reason: format!(
                         "encountered '{open}' while still inside an open chunk"
                     ),
@@ -72,7 +71,7 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
                 None => {
                     return Err(OovraError::BodyParse {
                         id: element.header.id.clone(),
-                        order: element.header.order,
+                        body_level,
                         reason: format!(
                             "encountered '{close}' without a matching '{open}'"
                         ),
@@ -87,7 +86,7 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
     if current.is_some() {
         return Err(OovraError::BodyParse {
             id: element.header.id.clone(),
-            order: element.header.order,
+            body_level,
             reason: format!("missing '{close}' to close the final chunk"),
         });
     }
@@ -95,7 +94,7 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
     if chunks.is_empty() {
         return Err(OovraError::BodyParse {
             id: element.header.id.clone(),
-            order: element.header.order,
+            body_level,
             reason: format!("no '{open}' delimiters found in body"),
         });
     }
@@ -181,25 +180,34 @@ pub fn report(element: &PromptElement) -> Result<DecomposeReport> {
         .map(|e| ReportEntry {
             id: e.header.id.clone(),
             version: e.header.version.clone(),
-            order: e.header.order,
+            kind: kind_str(&e.header.kind),
             name: e.header.name.clone(),
         })
         .collect();
 
     Ok(DecomposeReport {
         element_id: element.header.id.clone(),
-        element_order: element.header.order,
+        element_kind: kind_str(&element.header.kind),
         element_version: element.header.version.clone(),
+        body_level: element.header.body_level.unwrap_or(0),
         render_mode: element.header.render_mode.clone(),
         inputs: entries,
     })
 }
 
+fn kind_str(k: &crate::header::PromptElementKind) -> &'static str {
+    match k {
+        crate::header::PromptElementKind::Atom => "atom",
+        crate::header::PromptElementKind::Compound => "compound",
+    }
+}
+
 #[derive(Debug, serde::Serialize)]
 pub struct DecomposeReport {
     pub element_id: String,
-    pub element_order: u32,
+    pub element_kind: &'static str,
     pub element_version: String,
+    pub body_level: u32,
     pub render_mode: Option<String>,
     pub inputs: Vec<ReportEntry>,
 }
@@ -208,6 +216,6 @@ pub struct DecomposeReport {
 pub struct ReportEntry {
     pub id: String,
     pub version: String,
-    pub order: u32,
+    pub kind: &'static str,
     pub name: String,
 }

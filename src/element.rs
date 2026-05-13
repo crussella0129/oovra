@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{OovraError, Result};
 use crate::header::{
-    is_kebab_case, is_valid_rfc3339, is_valid_semver, PromptElementHeader,
+    is_kebab_case, is_valid_rfc3339, is_valid_semver, PromptElementHeader, PromptElementKind,
 };
 
 /// In-memory representation of one Oovra file.
@@ -184,88 +184,117 @@ fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Res
         return Err(OovraError::EmptyBody(path.to_path_buf()));
     }
 
-    if header.is_composed() {
-        // composed_of is Some — require the companion fields jointly.
-        let generated_at = header.generated_at.as_deref().ok_or_else(|| {
-            OovraError::OrderRequiresField {
-                id: header.id.clone(),
-                order: header.order,
-                field: "generated_at",
-            }
-        })?;
-        if !is_valid_rfc3339(generated_at) {
+    match header.kind {
+        PromptElementKind::Atom => validate_atom(header, path),
+        PromptElementKind::Compound => validate_compound(header, path),
+    }
+}
+
+fn validate_atom(header: &PromptElementHeader, path: &Path) -> Result<()> {
+    // Atoms have no recipe and no composition metadata. Any compound-only
+    // field set on an atom is a validation error.
+    let forbidden: &[(&'static str, bool)] = &[
+        ("composed_of", header.composed_of.is_some()),
+        ("generated_at", header.generated_at.is_some()),
+        ("render_mode", header.render_mode.is_some()),
+        ("body_level", header.body_level.is_some()),
+        ("depth", header.depth.is_some()),
+    ];
+    for (field, present) in forbidden {
+        if *present {
             return Err(OovraError::InvalidField {
                 path: path.to_path_buf(),
-                field: "generated_at",
-                value: generated_at.to_string(),
-                reason: "must be RFC 3339 (e.g. \"2026-05-09T14:23:15Z\")".to_string(),
+                field,
+                value: "<set>".to_string(),
+                reason: "this field is only valid on compounds; atoms have no recipe".to_string(),
             });
         }
+    }
+    Ok(())
+}
 
-        if header.render_mode.is_none() {
-            return Err(OovraError::OrderRequiresField {
-                id: header.id.clone(),
-                order: header.order,
-                field: "render_mode",
+fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
+    // Compounds require composed_of plus all composition metadata.
+    let composed_of = header.composed_of.as_ref().ok_or_else(|| {
+        OovraError::MissingField {
+            path: path.to_path_buf(),
+            field: "composed_of",
+        }
+    })?;
+    if composed_of.is_empty() {
+        return Err(OovraError::InvalidField {
+            path: path.to_path_buf(),
+            field: "composed_of",
+            value: "[]".to_string(),
+            reason: "compounds must have at least one input".to_string(),
+        });
+    }
+    for input in composed_of {
+        if !is_kebab_case(&input.id) {
+            return Err(OovraError::InvalidField {
+                path: path.to_path_buf(),
+                field: "composed_of[].id",
+                value: input.id.clone(),
+                reason: "must be kebab-case".to_string(),
             });
         }
+        if !is_valid_semver(&input.version) {
+            return Err(OovraError::InvalidField {
+                path: path.to_path_buf(),
+                field: "composed_of[].version",
+                value: input.version.clone(),
+                reason: "must be valid semver".to_string(),
+            });
+        }
+    }
 
-        if header.body_level.is_none() {
-            return Err(OovraError::OrderRequiresField {
-                id: header.id.clone(),
-                order: header.order,
+    let generated_at = header.generated_at.as_deref().ok_or_else(|| {
+        OovraError::MissingField {
+            path: path.to_path_buf(),
+            field: "generated_at",
+        }
+    })?;
+    if !is_valid_rfc3339(generated_at) {
+        return Err(OovraError::InvalidField {
+            path: path.to_path_buf(),
+            field: "generated_at",
+            value: generated_at.to_string(),
+            reason: "must be RFC 3339 (e.g. \"2026-05-09T14:23:15Z\")".to_string(),
+        });
+    }
+
+    if header.render_mode.is_none() {
+        return Err(OovraError::MissingField {
+            path: path.to_path_buf(),
+            field: "render_mode",
+        });
+    }
+
+    match header.body_level {
+        None => {
+            return Err(OovraError::MissingField {
+                path: path.to_path_buf(),
                 field: "body_level",
             });
         }
-
-        let composed_of = header.composed_of.as_ref().expect("is_composed checked");
-
-        if composed_of.is_empty() {
+        Some(level) if level < 1 => {
             return Err(OovraError::InvalidField {
                 path: path.to_path_buf(),
-                field: "composed_of",
-                value: "[]".to_string(),
-                reason: "composed elements must have at least one input".to_string(),
+                field: "body_level",
+                value: level.to_string(),
+                reason: "must be >= 1 for compounds".to_string(),
             });
         }
+        Some(_) => {}
+    }
 
-        for input in composed_of {
-            if !is_kebab_case(&input.id) {
-                return Err(OovraError::InvalidField {
-                    path: path.to_path_buf(),
-                    field: "composed_of[].id",
-                    value: input.id.clone(),
-                    reason: "must be kebab-case".to_string(),
-                });
-            }
-            if !is_valid_semver(&input.version) {
-                return Err(OovraError::InvalidField {
-                    path: path.to_path_buf(),
-                    field: "composed_of[].version",
-                    value: input.version.clone(),
-                    reason: "must be valid semver".to_string(),
-                });
-            }
-        }
-    } else {
-        // composed_of is None: this must be an order-0 hand-authored
-        // element, and all companion fields must also be absent.
-        if header.order != 0 {
-            return Err(OovraError::HandAuthoredHigherOrder {
-                path: path.to_path_buf(),
-                order: header.order,
-            });
-        }
-        if header.generated_at.is_some()
-            || header.render_mode.is_some()
-            || header.body_level.is_some()
-        {
+    if let Some(depth) = header.depth {
+        if depth < 1 {
             return Err(OovraError::InvalidField {
                 path: path.to_path_buf(),
-                field: "generated_at|render_mode|body_level",
-                value: "<set>".to_string(),
-                reason: "these fields are only valid when composed_of is also present"
-                    .to_string(),
+                field: "depth",
+                value: depth.to_string(),
+                reason: "must be >= 1 for compounds".to_string(),
             });
         }
     }
@@ -338,7 +367,7 @@ mod tests {
 
     #[test]
     fn split_frontmatter_minimal_node() {
-        let content = "+++\nname = \"Test\"\norder = 0\nid = \"test\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nThe body.\n";
+        let content = "+++\nname = \"Test\"\nkind = \"atom\"\nid = \"test\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nThe body.\n";
         let (fm, body) = split_frontmatter(content, Path::new("test.md")).unwrap();
         assert!(fm.contains("name = \"Test\""));
         assert_eq!(body, "The body.");
@@ -360,10 +389,10 @@ mod tests {
 
     #[test]
     fn parse_round_trips_minimal_node() {
-        let content = "+++\nname = \"Refusal Policy\"\norder = 0\nid = \"refusal-policy\"\nversion = \"1.0.0\"\nmeta = \"Be brief.\"\n+++\n\nDecline harmful requests briefly.\n";
+        let content = "+++\nname = \"Refusal Policy\"\nkind = \"atom\"\nid = \"refusal-policy\"\nversion = \"1.0.0\"\nmeta = \"Be brief.\"\n+++\n\nDecline harmful requests briefly.\n";
         let element = parse(content, Path::new("refusal.md")).unwrap();
         assert_eq!(element.header.id, "refusal-policy");
-        assert_eq!(element.header.order, 0);
+        assert_eq!(element.header.kind, PromptElementKind::Atom);
         assert_eq!(element.body, "Decline harmful requests briefly.");
 
         let serialized = serialize(&element).unwrap();
@@ -374,31 +403,31 @@ mod tests {
 
     #[test]
     fn parse_rejects_non_kebab_id() {
-        let content = "+++\nname = \"X\"\norder = 0\nid = \"NotKebab\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"NotKebab\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
         assert!(matches!(err, OovraError::InvalidField { field: "id", .. }));
     }
 
     #[test]
     fn parse_rejects_non_semver_version() {
-        let content = "+++\nname = \"X\"\norder = 0\nid = \"x\"\nversion = \"v1.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"v1.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
         assert!(matches!(err, OovraError::InvalidField { field: "version", .. }));
     }
 
     #[test]
-    fn parse_rejects_higher_order_without_composed_of() {
-        // A hand-authored claim of `order = 1` without a recipe is rejected.
-        let content = "+++\nname = \"X\"\norder = 1\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+    fn parse_rejects_compound_without_composed_of() {
+        // A file claiming kind = "compound" but with no recipe is rejected.
+        let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::HandAuthoredHigherOrder { .. }));
+        assert!(matches!(err, OovraError::MissingField { field: "composed_of", .. }));
     }
 
     #[test]
-    fn parse_accepts_valid_composed_element() {
-        let content = "+++\nname = \"Composed\"\norder = 1\nid = \"composed\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\nbody_level = 1\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}, {id = \"b\", version = \"1.0.0\"}]\n+++\n\nbody\n";
+    fn parse_accepts_valid_compound_element() {
+        let content = "+++\nname = \"Composed\"\nkind = \"compound\"\nid = \"composed\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\nbody_level = 1\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}, {id = \"b\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let element = parse(content, Path::new("composed.md")).unwrap();
-        assert_eq!(element.header.order, 1);
+        assert_eq!(element.header.kind, PromptElementKind::Compound);
         assert_eq!(element.header.body_level, Some(1));
         let composed_of = element.header.composed_of.as_ref().unwrap();
         assert_eq!(composed_of.len(), 2);
@@ -406,17 +435,64 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_atomic_with_companion_fields() {
-        // Order-0 file with composed-only fields set should be rejected.
-        let content = "+++\nname = \"X\"\norder = 0\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\nbody_level = 1\n+++\n\nbody\n";
+    fn parse_rejects_atom_with_compound_fields() {
+        // Atom file with compound-only fields set should be rejected.
+        let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\nbody_level = 1\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::InvalidField { .. }));
+        assert!(matches!(err, OovraError::InvalidField { field: "body_level", .. }));
     }
 
     #[test]
-    fn parse_rejects_composed_without_body_level() {
-        let content = "+++\nname = \"X\"\norder = 1\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
+    fn parse_rejects_compound_without_body_level() {
+        let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::OrderRequiresField { field: "body_level", .. }));
+        assert!(matches!(err, OovraError::MissingField { field: "body_level", .. }));
+    }
+
+    #[test]
+    fn parse_rejects_missing_kind() {
+        // v0.2 SPEC §7.2: missing `kind` is a hard error in v0.2.
+        let content = "+++\nname = \"X\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let err = parse(content, Path::new("x.md")).unwrap_err();
+        assert!(matches!(err, OovraError::InvalidToml { .. }));
+    }
+
+    #[test]
+    fn parse_rejects_invalid_kind_value() {
+        // v0.2 SPEC §7.2: only "atom" and "compound" are legal kind values.
+        let content = "+++\nname = \"X\"\nkind = \"atomic\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let err = parse(content, Path::new("x.md")).unwrap_err();
+        assert!(matches!(err, OovraError::InvalidToml { .. }));
+    }
+
+    #[test]
+    fn atom_validator_forbids_compound_only_fields() {
+        // v0.2 SPEC §7.2: each compound-only field on an atom is rejected.
+        for field in ["composed_of", "generated_at", "render_mode", "body_level"] {
+            let extra = match field {
+                "composed_of" => "composed_of = [{id = \"a\", version = \"1.0.0\"}]",
+                "generated_at" => "generated_at = \"2026-05-09T14:23:15Z\"",
+                "render_mode" => "render_mode = \"markdown-h2\"",
+                "body_level" => "body_level = 1",
+                _ => unreachable!(),
+            };
+            let content = format!(
+                "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n{extra}\n+++\n\nbody\n"
+            );
+            let err = parse(&content, Path::new("x.md")).unwrap_err();
+            assert!(
+                matches!(err, OovraError::InvalidField { field: f, .. } if f == field),
+                "atom with {field} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn compound_validator_requires_all_companions() {
+        // v0.2 SPEC §7.2: each compound-required companion field is checked.
+        // generated_at, render_mode, and body_level are all required.
+        let bare = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
+        let err = parse(bare, Path::new("x.md")).unwrap_err();
+        assert!(matches!(err, OovraError::MissingField { .. }));
     }
 }

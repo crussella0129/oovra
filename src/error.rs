@@ -64,15 +64,9 @@ pub enum OovraError {
     #[error("Empty body in {0}. The body must be non-empty after stripping whitespace.")]
     EmptyBody(PathBuf),
 
-    #[error("Order-{order} element '{id}' is missing the '{field}' field, which is required for order >= 1")]
-    OrderRequiresField {
-        id: String,
-        order: u32,
-        field: &'static str,
-    },
-
-    #[error("Hand-authored elements must be order 0; found order {order} in {path}. Use 'oovra compose' to produce higher-order elements.")]
-    HandAuthoredHigherOrder { path: PathBuf, order: u32 },
+    // Removed in v0.2: OrderRequiresField, HandAuthoredHigherOrder.
+    // Replaced by MissingField (above) plus the kind-aware validator in
+    // src/element.rs.
 
     #[error("Duplicate ID '{id}' in library: '{first}' and '{second}'")]
     DuplicateId {
@@ -91,15 +85,11 @@ pub enum OovraError {
         actual: String,
     },
 
-    #[error("Cannot compare elements of different orders: '{a_id}' is order {a_order}, '{b_id}' is order {b_order}. Compare requires same-order inputs.")]
-    OrderMismatch {
-        a_id: String,
-        a_order: u32,
-        b_id: String,
-        b_order: u32,
-    },
+    // Removed in v0.2: OrderMismatch. Order is gone; kind-mismatch is the
+    // remaining axis of disagreement, reported via AtomicityMismatch below
+    // (renamed to KindMismatch in commit 5/6).
 
-    #[error("Cannot compare an atomic element with a composed element: '{a_id}' is {a_kind}, '{b_id}' is {b_kind}. Compare requires both inputs to be the same kind (both atomic or both composed).")]
+    #[error("Cannot compare an atom with a compound: '{a_id}' is {a_kind}, '{b_id}' is {b_kind}. Compare requires both inputs to be the same kind.")]
     AtomicityMismatch {
         a_id: String,
         a_kind: &'static str,
@@ -116,10 +106,10 @@ pub enum OovraError {
     #[error("Cannot decompose atomic element '{id}'. Atomic elements have no recipe (no `composed_of` field). Only Compose-produced elements can be decomposed.")]
     CannotDecomposeAtomic { id: String },
 
-    #[error("Body of order-{order} element '{id}' could not be split into the expected sub-element chunks: {reason}")]
+    #[error("Body of compound '{id}' at body_level {body_level} could not be split into the expected sub-element chunks: {reason}")]
     BodyParse {
         id: String,
-        order: u32,
+        body_level: u32,
         reason: String,
     },
 

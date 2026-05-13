@@ -1,6 +1,6 @@
 +++
 name = "Tone: Direct"
-order = 0
+kind = "atom"
 id = "tone-direct"
 version = "1.0.0"
 meta = "Skip preamble and apology; lead with the conclusion unless reasoning must come first."

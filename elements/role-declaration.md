@@ -1,6 +1,6 @@
 +++
 name = "Role Declaration: Senior Engineer"
-order = 0
+kind = "atom"
 id = "role-declaration"
 version = "1.0.0"
 meta = "Establishes the assistant's persona and posture for a coding task."

@@ -71,7 +71,7 @@ fn compose_round_trip_preserves_recipe_and_decomposes_lossless() {
 
     // Header round-trips exactly.
     assert_eq!(reparsed.header.id, composed.header.id);
-    assert_eq!(reparsed.header.order, composed.header.order);
+    assert_eq!(reparsed.header.kind, composed.header.kind);
     assert_eq!(reparsed.header.body_level, composed.header.body_level);
     assert_eq!(reparsed.header.composed_of, composed.header.composed_of);
 
@@ -88,11 +88,16 @@ fn compose_round_trip_preserves_recipe_and_decomposes_lossless() {
 }
 
 #[test]
-fn library_loads_five_order_zero_elements() {
+fn library_loads_five_atoms() {
     let library = Library::load(elements_dir()).unwrap();
     assert_eq!(library.len(), 5);
     for element in library.elements.values() {
-        assert_eq!(element.header.order, 0, "{}", element.header.id);
+        assert_eq!(
+            element.header.kind,
+            oovra::header::PromptElementKind::Atom,
+            "{}",
+            element.header.id
+        );
     }
 }
 
@@ -112,7 +117,8 @@ fn compose_three_order_zero_into_one_order_one() {
         output_meta: "Three-element strict coding-agent prompt".into(),
     };
     let composed = compose(req).unwrap();
-    assert_eq!(composed.header.order, 1);
+    assert_eq!(composed.header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(composed.header.body_level, Some(1));
     assert_eq!(
         composed.header.composed_of.as_ref().map(|v| v.len()),
         Some(3)
@@ -187,7 +193,8 @@ fn compose_two_order_one_into_one_order_two() {
     })
     .unwrap();
 
-    assert_eq!(order_two.header.order, 2);
+    assert_eq!(order_two.header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(order_two.header.body_level, Some(2));
     assert!(order_two.body.contains("~~~>>"));
     assert!(order_two.body.contains("~~~<<"));
     // Inner level-1 delimiters must be preserved verbatim.
@@ -366,27 +373,27 @@ fn compare_structural_diff_detects_version_change() {
             assert_eq!(s.version_changed[0].before_version, "1.0.0");
             assert_eq!(s.version_changed[0].after_version, "1.1.0");
         }
-        DiffReport::Content(_) => panic!("expected structural diff for order-1 elements"),
+        DiffReport::Content(_) => panic!("expected structural diff for compounds"),
     }
 }
 
 #[test]
-fn mixed_order_compose_does_not_collide_with_inner_delimiters() {
-    // Regression test for the body-delimiter escalation bug: composing an
-    // order-1 element with order-0 elements used to produce a body whose
-    // top-level delimiters collided with the inner element's body delimiters.
-    // After the body_level fix, the top-level delimiter level is always
-    // strictly greater than any input's body delimiter level.
+fn mixed_kind_compose_does_not_collide_with_inner_delimiters() {
+    // Regression test for the body-delimiter escalation bug: composing a
+    // compound with atoms used to produce a body whose top-level delimiters
+    // collided with the inner compound's body delimiters. After the
+    // body_level fix, the top-level delimiter level is always strictly
+    // greater than any input's body delimiter level.
     let library = Library::load(elements_dir()).unwrap();
 
-    // Build an order-1 first.
+    // Build an inner compound first.
     let inner = compose(ComposeRequest {
         library: &library,
         inputs: vec![
             ("role-declaration".into(), None),
             ("refusal-policy-strict".into(), None),
         ],
-        output_id: "inner-order-one".into(),
+        output_id: "inner-compound".into(),
         output_name: "Inner".into(),
         output_version: "1.0.0".into(),
         output_meta: String::new(),
@@ -394,49 +401,48 @@ fn mixed_order_compose_does_not_collide_with_inner_delimiters() {
     .unwrap();
 
     // Stage so it can be re-resolved as an input.
-    let tmp = tempdir_for_test("mixed-order");
+    let tmp = tempdir_for_test("mixed-kind");
     for entry in std::fs::read_dir(elements_dir()).unwrap() {
         let p = entry.unwrap().path();
         std::fs::copy(&p, tmp.join(p.file_name().unwrap())).unwrap();
     }
-    write(&inner, &tmp.join("inner-order-one.md")).unwrap();
+    write(&inner, &tmp.join("inner-compound.md")).unwrap();
 
     let staged_lib = Library::load(&tmp).unwrap();
     let mixed = compose(ComposeRequest {
         library: &staged_lib,
         inputs: vec![
-            ("inner-order-one".into(), None),  // order 1
-            ("tone-direct".into(), None),      // order 0
+            ("inner-compound".into(), None),   // compound, body_level 1
+            ("tone-direct".into(), None),      // atom
         ],
-        output_id: "mixed-order".into(),
+        output_id: "mixed-kind".into(),
         output_name: "Mixed".into(),
         output_version: "1.0.0".into(),
         output_meta: String::new(),
     })
     .unwrap();
 
-    // Per the user's formula: highest=1, count=1 (no peer at 1), so order
-    // does not climb. But body_level MUST climb to keep the parser
-    // unambiguous.
-    assert_eq!(mixed.header.order, 1);
+    // The outer compound must escalate body_level to 2 to avoid colliding
+    // with the inner compound's level-1 delimiters.
+    assert_eq!(mixed.header.kind, oovra::header::PromptElementKind::Compound);
     assert_eq!(mixed.header.body_level, Some(2));
 
     // Decompose must succeed because the outer delimiters are level 2
     // (3 tildes) while the inner element's body uses level-1 (2 tildes).
     let immediate = decompose(&mixed).unwrap();
     assert_eq!(immediate.len(), 2);
-    assert_eq!(immediate[0].header.id, "inner-order-one");
+    assert_eq!(immediate[0].header.id, "inner-compound");
     assert_eq!(immediate[1].header.id, "tone-direct");
 
-    // The recovered inner is still a valid order-1 with its own body_level=1.
-    assert_eq!(immediate[0].header.order, 1);
+    // The recovered inner is still a valid compound with its own body_level=1.
+    assert_eq!(immediate[0].header.kind, oovra::header::PromptElementKind::Compound);
     assert_eq!(immediate[0].header.body_level, Some(1));
 }
 
 #[test]
-fn compare_refuses_different_orders() {
+fn compare_refuses_atom_vs_compound() {
     let library = Library::load(elements_dir()).unwrap();
-    let order_one = compose(ComposeRequest {
+    let compound = compose(ComposeRequest {
         library: &library,
         inputs: vec![
             ("role-declaration".into(), None),
@@ -448,9 +454,9 @@ fn compare_refuses_different_orders() {
         output_meta: String::new(),
     })
     .unwrap();
-    let order_zero = library.get("role-declaration").unwrap();
-    let err = compare(order_zero, &order_one).unwrap_err();
-    assert!(matches!(err, oovra::OovraError::OrderMismatch { .. }));
+    let atom = library.get("role-declaration").unwrap();
+    let err = compare(atom, &compound).unwrap_err();
+    assert!(matches!(err, oovra::OovraError::AtomicityMismatch { .. }));
 }
 
 /// Lightweight tempdir helper. Creates a unique directory under

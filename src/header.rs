@@ -1,22 +1,25 @@
 //! The TOML frontmatter schema for every Oovra prompt element.
 //!
-//! Every Oovra file has the same shape — there is no `kind` discriminator.
-//! Instead, a numeric `order` field tells you what kind of element this is:
+//! Every Oovra file is a `PromptElement`. Its `kind` field tells you which of
+//! two shapes the file has:
 //!
-//! - `order = 0` is an atomic, hand-authored element (a sentence or paragraph
-//!   that is internally consistent on its own).
-//! - `order = 1` is a composition of order-0 elements (formerly "completed
-//!   policy").
-//! - `order = N` is a composition where at least two inputs were themselves
-//!   order `N-1` — see [`compute_order`](crate::render::compute_order) for
-//!   the rule.
+//! - `kind = "atom"` is a hand-authored element. Its body is freeform
+//!   Markdown. It has no recipe.
+//! - `kind = "compound"` is a composition produced by `oovra compose`. Its
+//!   body is a sequence of wrapped sub-prompt-element files (see the chiral
+//!   delimiter scheme in [`crate::element`]). It carries a `composed_of`
+//!   recipe plus composition metadata (`generated_at`, `render_mode`,
+//!   `body_level`, and optional `depth`).
 //!
 //! Required fields for ALL elements:
-//! - `name`, `order`, `id`, `version`, `meta` (may be empty string)
+//! - `name`, `kind`, `id`, `version`, `meta` (may be empty string)
 //!
-//! Required when `order >= 1`:
-//! - `generated_at` (RFC 3339 timestamp), `render_mode` (e.g. "markdown-h2"),
-//!   `composed_of` (array of immediate-input id+version records).
+//! Required when `kind = "compound"`:
+//! - `generated_at` (RFC 3339), `render_mode` (e.g. `"markdown-h2"`),
+//!   `body_level` (>= 1, used by the body parser), and `composed_of`
+//!   (non-empty array of immediate-input `{id, version}` records).
+//!
+//! Optional on compounds, derived from the recipe: `depth`.
 
 use serde::{Deserialize, Serialize};
 
@@ -53,30 +56,22 @@ impl InputRef {
     }
 }
 
-/// The full TOML frontmatter of a prompt element. One struct for all kinds of
-/// element; fields that are only meaningful for composed elements are
-/// `Option<T>` and validated jointly.
+/// The full TOML frontmatter of a prompt element. One struct for both kinds
+/// of element (`atom` and `compound`); fields that are only meaningful for
+/// compounds are `Option<T>` and validated jointly against `kind`.
 ///
-/// Two distinct concepts that must not be conflated:
-///
-/// - `order` is the **logical compositional depth** computed by the user's
-///   formula in [`crate::render::compute_order`]: only climbs when at least
-///   two inputs are peers at the highest input order.
-/// - `body_level` is the **physical delimiter level** used inside the body —
-///   always `max(input.order) + 1` at compose time. This satisfies the
-///   strict-monotonicity escalation rule the body parser depends on, even
-///   when the logical order does not climb. The two values coincide in the
-///   common homogeneous case but diverge for mixed-order compositions.
+/// `body_level` is the **physical delimiter level** used inside the body of a
+/// compound — always `max(input.body_level, default = 0) + 1` at compose
+/// time. This satisfies the strict-monotonicity escalation rule the body
+/// parser depends on, regardless of how the inputs are bracketed. `depth` is
+/// the same number minus one, exposed as a human-friendly compositional-depth
+/// metric; the body parser does not consume it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptElementHeader {
     pub name: String,
-    /// The kind of element. v0.2 introduces this as the canonical discriminator
-    /// (`"atom"` for hand-authored, `"compound"` for composed). v0.1 files
-    /// without this field deserialize as `Atom` via `Default`. In commit 3 the
-    /// `#[serde(default)]` is dropped and missing `kind` becomes a hard error.
-    #[serde(default)]
+    /// The kind of element. Canonical v0.2 discriminator — `"atom"` for
+    /// hand-authored, `"compound"` for composed. Required on every file.
     pub kind: PromptElementKind,
-    pub order: u32,
     pub id: String,
     pub version: String,
     /// Free-form description; may be empty string.

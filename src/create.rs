@@ -1,8 +1,8 @@
-//! Create: scaffold a new order-0 element from scratch, or label an existing
-//! Markdown file by prepending a generated header.
+//! Create: scaffold a new atom from scratch, or label an existing Markdown
+//! file by prepending a generated header.
 //!
-//! Both modes produce order-0 elements only — by construction Create cannot
-//! produce a higher-order element. Use `compose` for that.
+//! Both modes produce atoms only — by construction Create cannot produce a
+//! compound. Use `compose` for that.
 //!
 //! Both modes verify their work by re-parsing the output through the Stage 1
 //! parser. If the post-write parse fails, Create reports the error rather
@@ -30,7 +30,6 @@ pub fn scaffold(args: ScaffoldArgs) -> Result<PathBuf> {
     let header = PromptElementHeader {
         name: args.name.unwrap_or_else(|| args.id.clone()),
         kind: PromptElementKind::Atom,
-        order: 0,
         id: args.id.clone(),
         version: args.version,
         meta: args.meta,
@@ -43,7 +42,7 @@ pub fn scaffold(args: ScaffoldArgs) -> Result<PathBuf> {
 
     let body = format!(
         "<!-- TODO: write the prompt body for `{}` here. \
-         This element is order 0 — atomic, internally consistent, portable across compositions. -->",
+         This element is an atom — hand-authored, internally consistent, portable across compositions. -->",
         args.id
     );
 
@@ -95,7 +94,6 @@ pub fn label(args: LabelArgs) -> Result<PathBuf> {
     let header = PromptElementHeader {
         name: args.name.unwrap_or_else(|| args.id.clone()),
         kind: PromptElementKind::Atom,
-        order: 0,
         id: args.id.clone(),
         version: args.version,
         meta: args.meta,

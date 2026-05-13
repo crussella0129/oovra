@@ -1,6 +1,6 @@
 +++
 name = "Output Format: Markdown"
-order = 0
+kind = "atom"
 id = "output-format-markdown"
 version = "1.0.0"
 meta = "Markdown output, fenced code blocks with language tags, lists only when content is parallel."

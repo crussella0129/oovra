@@ -1,6 +1,6 @@
 +++
 name = "Examples Block: Worked Cases"
-order = 0
+kind = "atom"
 id = "examples-block"
 version = "1.0.0"
 meta = "Anchor each guidance section with one concrete worked example."

@@ -1,6 +1,6 @@
 +++
 name = "Strict Refusal Policy"
-order = 0
+kind = "atom"
 id = "refusal-policy-strict"
 version = "1.0.0"
 meta = "Brief, non-preachy decline of harmful requests; always pair with role-declaration."

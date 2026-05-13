@@ -1,11 +1,9 @@
-//! Compare: the FORWARD-DIFF operator with order-aware dispatch.
+//! Compare: the FORWARD-DIFF operator with kind-aware dispatch.
 //!
-//! - **Same order, both 0** → content diff (body unified diff + metadata
-//!   changes).
-//! - **Same order, both >= 1** → structural diff over `composed_of`. Reports
-//!   inputs added, removed, and version-changed.
-//! - **Different orders** → refused with a clear error suggesting the user
-//!   probably meant to compare same-order elements.
+//! - **Both atoms** → content diff (body unified diff + metadata changes).
+//! - **Both compounds** → structural diff over `composed_of`. Reports inputs
+//!   added, removed, and version-changed.
+//! - **Mixed (atom vs compound)** → refused with a clear error.
 
 use std::collections::HashMap;
 
@@ -14,7 +12,7 @@ use similar::TextDiff;
 
 use crate::element::PromptElement;
 use crate::error::{OovraError, Result};
-use crate::header::InputRef;
+use crate::header::{InputRef, PromptElementKind};
 
 /// Top-level result of [`compare`].
 #[derive(Debug, Serialize)]
@@ -41,12 +39,11 @@ pub struct FieldChange {
     pub after: String,
 }
 
-/// Diff of two composed (order >= 1) elements.
+/// Diff of two compounds.
 #[derive(Debug, Serialize)]
 pub struct StructuralDiff {
     pub a_id: String,
     pub b_id: String,
-    pub order: u32,
     pub added: Vec<InputRef>,
     pub removed: Vec<InputRef>,
     pub version_changed: Vec<VersionChange>,
@@ -60,28 +57,30 @@ pub struct VersionChange {
     pub after_version: String,
 }
 
-/// Dispatch a comparison between two prompt elements based on their orders
-/// and whether each has a recipe.
+/// Dispatch a comparison between two prompt elements based on their kinds.
+/// Atom + atom = content diff; compound + compound = structural diff;
+/// mixed = error.
 pub fn compare(a: &PromptElement, b: &PromptElement) -> Result<DiffReport> {
-    if a.header.order != b.header.order {
-        return Err(OovraError::OrderMismatch {
+    match (a.header.kind, b.header.kind) {
+        (PromptElementKind::Atom, PromptElementKind::Atom) => {
+            Ok(DiffReport::Content(content_diff(a, b)))
+        }
+        (PromptElementKind::Compound, PromptElementKind::Compound) => {
+            Ok(DiffReport::Structural(structural_diff(a, b)?))
+        }
+        (a_kind, b_kind) => Err(OovraError::AtomicityMismatch {
             a_id: a.header.id.clone(),
-            a_order: a.header.order,
+            a_kind: kind_label(a_kind),
             b_id: b.header.id.clone(),
-            b_order: b.header.order,
-        });
-    }
-
-    // Both must be either atomic or both composed; mixing is ambiguous.
-    match (a.header.is_atomic(), b.header.is_atomic()) {
-        (true, true) => Ok(DiffReport::Content(content_diff(a, b))),
-        (false, false) => Ok(DiffReport::Structural(structural_diff(a, b)?)),
-        (a_atomic, _) => Err(OovraError::AtomicityMismatch {
-            a_id: a.header.id.clone(),
-            a_kind: if a_atomic { "atomic" } else { "composed" },
-            b_id: b.header.id.clone(),
-            b_kind: if a_atomic { "composed" } else { "atomic" },
+            b_kind: kind_label(b_kind),
         }),
+    }
+}
+
+fn kind_label(k: PromptElementKind) -> &'static str {
+    match k {
+        PromptElementKind::Atom => "atom",
+        PromptElementKind::Compound => "compound",
     }
 }
 
@@ -124,20 +123,10 @@ fn track_field(out: &mut Vec<FieldChange>, name: &str, before: &str, after: &str
 }
 
 fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDiff> {
-    let a_inputs = a.header.composed_of.as_ref().ok_or_else(|| {
-        OovraError::OrderRequiresField {
-            id: a.header.id.clone(),
-            order: a.header.order,
-            field: "composed_of",
-        }
-    })?;
-    let b_inputs = b.header.composed_of.as_ref().ok_or_else(|| {
-        OovraError::OrderRequiresField {
-            id: b.header.id.clone(),
-            order: b.header.order,
-            field: "composed_of",
-        }
-    })?;
+    // A valid Compound has composed_of by definition; the validator ensures
+    // this before `compare` is reachable.
+    let a_inputs = a.header.composed_of.as_ref().expect("compound has composed_of");
+    let b_inputs = b.header.composed_of.as_ref().expect("compound has composed_of");
 
     let a_by_id: HashMap<&str, &str> = a_inputs
         .iter()
@@ -178,7 +167,6 @@ fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDif
     Ok(StructuralDiff {
         a_id: a.header.id.clone(),
         b_id: b.header.id.clone(),
-        order: a.header.order,
         added,
         removed,
         version_changed,

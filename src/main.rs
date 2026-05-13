@@ -1,9 +1,9 @@
 //! `oovra` — CLI front-end.
 //!
 //! Four subcommands:
-//!   - create    Scaffold a new order-0 element or label an existing .md file
-//!   - compose   Compose ordered inputs into a higher-order element
-//!   - decompose Recover a composition's inputs (one level, or --full)
+//!   - create    Scaffold a new atom or label an existing .md file
+//!   - compose   Compose ordered inputs into a compound
+//!   - decompose Recover a compound's inputs (one level, or --full)
 //!   - compare   Diff two prompt elements (kind-aware)
 
 use std::path::PathBuf;
@@ -28,13 +28,13 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Create a new prompt element (always order 0)
+    /// Create a new prompt element (always an atom)
     Create(CreateArgs),
 
-    /// Compose prompt elements into a higher-order element
+    /// Compose prompt elements into a compound
     Compose(ComposeArgs),
 
-    /// Decompose a composed element into its inputs
+    /// Decompose a compound into its inputs
     Decompose(DecomposeArgs),
 
     /// Compare two prompt elements
@@ -43,7 +43,7 @@ enum Command {
 
 #[derive(clap::Args, Debug)]
 struct CreateArgs {
-    /// Scaffold a new order-0 element with this ID
+    /// Scaffold a new atom with this ID
     #[arg(long, group = "mode")]
     new: Option<String>,
 
@@ -117,10 +117,10 @@ struct ComposeArgs {
 
 #[derive(clap::Args, Debug)]
 struct DecomposeArgs {
-    /// Path to a composed element (one that has a `composed_of` recipe)
+    /// Path to a compound (one that has a `composed_of` recipe)
     path: PathBuf,
 
-    /// Recursively decompose to order-0 leaves and write a folder tree
+    /// Recursively decompose to atom leaves and write a folder tree
     #[arg(long)]
     full: bool,
 
@@ -234,10 +234,10 @@ fn run_compose(args: ComposeArgs) -> anyhow::Result<()> {
         let composed = compose(req)?;
         write(&composed, &re_render_path)?;
         println!(
-            "{} {} (order {})",
+            "{} {} (body_level {})",
             "Re-rendered".green().bold(),
             re_render_path.display(),
-            composed.header.order
+            composed.header.body_level.unwrap_or(0)
         );
         return Ok(());
     }
@@ -284,10 +284,10 @@ fn run_compose(args: ComposeArgs) -> anyhow::Result<()> {
         .unwrap_or_else(|| args.library.join(format!("{out_id}.md")));
     write(&composed, &output_path)?;
     println!(
-        "{} {} (order {}, {} inputs)",
+        "{} {} (compound, body_level {}, {} inputs)",
         "Composed".green().bold(),
         output_path.display(),
-        composed.header.order,
+        composed.header.body_level.unwrap_or(0),
         composed.header.composed_of.as_ref().map(|v| v.len()).unwrap_or(0)
     );
     Ok(())
@@ -314,19 +314,20 @@ fn run_decompose(args: DecomposeArgs) -> anyhow::Result<()> {
         println!("{s}");
     } else {
         println!(
-            "{} {} ({}) — order {}, {} immediate input(s)",
+            "{} {} ({}) — {} at body_level {}, {} immediate input(s)",
             "Decompose".bold(),
             report_data.element_id.cyan(),
             report_data.element_version.dimmed(),
-            report_data.element_order,
+            report_data.element_kind,
+            report_data.body_level,
             report_data.inputs.len()
         );
         for entry in &report_data.inputs {
             println!(
-                "  - {} {} (order {}) {}",
+                "  - {} {} ({}) {}",
                 entry.id.cyan(),
                 format!("@ {}", entry.version).dimmed(),
-                entry.order,
+                entry.kind,
                 if !entry.name.is_empty() && entry.name != entry.id {
                     format!("— {}", entry.name)
                 } else {
@@ -352,7 +353,7 @@ fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
     match report {
         DiffReport::Content(c) => {
             println!(
-                "{} {} <-> {}  (order 0, content diff)",
+                "{} {} <-> {}  (atoms, content diff)",
                 "Compare".bold(),
                 c.a_id.cyan(),
                 c.b_id.cyan()
@@ -389,11 +390,10 @@ fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
         }
         DiffReport::Structural(s) => {
             println!(
-                "{} {} <-> {}  (order {}, structural diff)",
+                "{} {} <-> {}  (compounds, structural diff)",
                 "Compare".bold(),
                 s.a_id.cyan(),
                 s.b_id.cyan(),
-                s.order
             );
             if s.recipes_equal {
                 println!("  recipes: {}", "identical".dimmed());
