@@ -137,8 +137,13 @@ Every Oovra file is a valid Markdown file, so the entire library is also a valid
 
 ## Status
 
-v0.1 — working. 32 tests passing (21 unit + 11 integration), including regression tests for the mixed-order body-delimiter collision case and the create-with-invalid-id orphan-file case. See [`Documentation/build-guide.md`](./Documentation/build-guide.md) for the from-first-principles step-by-step build guide derived from this codebase.
+v0.1 — working. 32 tests passing (21 unit + 11 integration), including regression tests for the mixed-order body-delimiter collision case and the create-with-invalid-id orphan-file case. See [`Documentation/reference/build-guide.md`](./Documentation/reference/build-guide.md) for the from-first-principles step-by-step build guide derived from this codebase.
 
 ## License
 
-Dual MIT / Apache-2.0 — see LICENSE.
+Dual-licensed under either of:
+
+- MIT License ([LICENSE-MIT](./LICENSE-MIT))
+- Apache License, Version 2.0 ([LICENSE-APACHE](./LICENSE-APACHE))
+
+at your option. Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
