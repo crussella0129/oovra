@@ -1,6 +1,8 @@
 # `oovra create` — Reference
 
-Creates a new atomic (order-0) prompt element, either from scratch (`--new`) or by labeling an existing Markdown file (`--label`).
+Creates a new **atom** (`kind = "atom"`) prompt element, either from scratch (`--new`) or by labeling an existing Markdown file (`--label`).
+
+> **v0.2 migration note.** This page documents the v0.2 schema. The `order = 0` integer is gone; atoms are now declared with `kind = "atom"`. If you have v0.1 files on disk, run `oovra migrate <library-dir>` to convert them in place.
 
 ## Synopsis
 
@@ -13,7 +15,7 @@ Exactly one of `--new` or `--label` must be passed.
 
 ## What it does
 
-Both modes produce an **atomic** element (`order = 0`, no `composed_of`). To create higher-order elements, use [`oovra compose`](./command-compose.md) — there is no way to hand-author a file with `order ≥ 1`; the parser actively rejects such files.
+Both modes produce an **atom** (`kind = "atom"`, no `composed_of`). Atoms cannot be promoted to compounds by hand — that's [`oovra compose`](./command-compose.md)'s job. The parser actively rejects any hand-authored file claiming `kind = "compound"` without a real recipe.
 
 The command validates its work in two ways:
 
@@ -26,7 +28,7 @@ If either check fails, you get a [structured error](./errors.md) pointing to the
 
 ## Mode 1: `--new <ID>` — scaffold from scratch
 
-Creates a fresh `.md` file at `<library>/<id>.md` with the required frontmatter and a TODO-placeholder body, so the file is immediately a valid Oovra atomic element.
+Creates a fresh `.md` file at `<library>/<id>.md` with the required frontmatter and a TODO-placeholder body, so the file is immediately a valid Oovra atom.
 
 ### Flags
 
@@ -47,13 +49,13 @@ A file at `<library>/<id>.md` with this exact shape (modulo your flag values):
 ```toml
 +++
 name = "<NAME or ID>"
-order = 0
+kind = "atom"
 id = "<ID>"
 version = "<VERSION>"
 meta = "<META>"
 +++
 
-<!-- TODO: write the prompt body for `<ID>` here. This element is order 0 — atomic, internally consistent, portable across compositions. -->
+<!-- TODO: write the prompt body for `<ID>` here. This element is an atom — internally consistent, portable across compositions. -->
 ```
 
 The TODO comment is the body. It's a valid Markdown comment, and the resulting file passes validation immediately — but you should replace it with actual prompt content before composing.
@@ -69,13 +71,13 @@ Result on disk at `./elements/refusal-policy.md`:
 ```toml
 +++
 name = "Refusal Policy"
-order = 0
+kind = "atom"
 id = "refusal-policy"
 version = "1.0.0"
 meta = "Brief decline of harmful requests"
 +++
 
-<!-- TODO: write the prompt body for `refusal-policy` here. This element is order 0 — atomic, internally consistent, portable across compositions. -->
+<!-- TODO: write the prompt body for `refusal-policy` here. This element is an atom — internally consistent, portable across compositions. -->
 ```
 
 You then open the file in your editor and replace the TODO with the actual policy text.
@@ -93,7 +95,7 @@ You then open the file in your editor and replace the TODO with the actual polic
 
 ## Mode 2: `--label <PATH>` — promote an existing Markdown file
 
-Takes an existing `.md` file and prepends an Oovra header in place. The file's existing prose becomes the body of an atomic element.
+Takes an existing `.md` file and prepends an Oovra header in place. The file's existing prose becomes the body of an atom.
 
 ### Flags
 
@@ -114,7 +116,7 @@ The file at `<PATH>` is rewritten in place. The new content is:
 ```toml
 +++
 name = "<NAME or ID>"
-order = 0
+kind = "atom"
 id = "<ID>"
 version = "<VERSION>"
 meta = "<META>"
@@ -156,7 +158,7 @@ Result at `./docs/refactor-rules.md`:
 ```toml
 +++
 name = "Refactor Discipline"
-order = 0
+kind = "atom"
 id = "refactor-rules"
 version = "1.0.0"
 meta = "Refactors must end green"
@@ -188,17 +190,17 @@ If two files in the same library have the same `id`, [`Library::load`](./errors.
 
 ---
 
-## Why `create` always produces order-0
+## Why `create` always produces atoms
 
-The parser's joint validator rejects any file with `order > 0` that lacks a `composed_of` recipe. So if `create` produced higher-order files, they would be malformed by construction — they would lack a real recipe.
+The parser's joint validator rejects any file with `kind = "compound"` that lacks a `composed_of` recipe. So if `create` produced compound files, they would be malformed by construction — they would lack a real recipe.
 
-`compose` is the only path to a composed file because it's the only place where a real recipe (with real input versions) exists. This is intentional: it prevents authoring inconsistencies where someone hand-types a fake `composed_of` array referring to nodes that don't exist or are at different versions than claimed.
+`compose` is the only path to a compound file because it's the only place where a real recipe (with real input versions) exists. This is intentional: it prevents authoring inconsistencies where someone hand-types a fake `composed_of` array referring to nodes that don't exist or are at different versions than claimed.
 
 ---
 
 ## See also
 
 - [schema.md](./schema.md) — the file format `create` produces
-- [command-compose.md](./command-compose.md) — how to combine atomic elements into higher-order ones
+- [command-compose.md](./command-compose.md) — how to combine atoms into compounds
 - [errors.md](./errors.md) — all validation errors `create` can surface
-- [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) — uses `create --new` to scaffold four atomics before composing them
+- [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) — uses `create --new` to scaffold four atoms before composing them

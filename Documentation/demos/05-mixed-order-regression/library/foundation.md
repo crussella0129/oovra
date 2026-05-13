@@ -1,12 +1,13 @@
 +++
 name = "Foundation"
-order = 1
+kind = "compound"
 id = "foundation"
 version = "1.0.0"
 meta = "Order-1 from 2 atomics"
 generated_at = "2026-05-10T19:36:23.907826700+00:00"
 render_mode = "markdown-h2"
 body_level = 1
+depth = 1
 
 [[composed_of]]
 id = "role-statement"
@@ -20,7 +21,7 @@ version = "1.0.0"
 ~~>>
 +++
 name = "Role Statement"
-order = 0
+kind = "atom"
 id = "role-statement"
 version = "1.0.0"
 meta = "Who the assistant is"
@@ -31,7 +32,7 @@ You are a senior software engineer pairing with a developer at the keyboard. Sta
 ~~>>
 +++
 name = "Safety Fence"
-order = 0
+kind = "atom"
 id = "safety-fence"
 version = "1.0.0"
 meta = "Refusal posture"

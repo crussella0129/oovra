@@ -1,6 +1,6 @@
 +++
 name = "Role Statement"
-order = 0
+kind = "atom"
 id = "role-statement"
 version = "2.0.0"
 meta = "Who the assistant is"

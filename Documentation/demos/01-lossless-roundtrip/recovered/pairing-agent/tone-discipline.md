@@ -1,6 +1,6 @@
 +++
 name = "Tone Discipline"
-order = 0
+kind = "atom"
 id = "tone-discipline"
 version = "1.0.0"
 meta = "Direct, no preamble"

@@ -1,12 +1,15 @@
 # `oovra compare` — Reference
 
-Diffs two Oovra files. The FORWARD-DIFF operator. Dispatches on **two axes** — order match and atomicity match — into one of four outcomes: content diff, structural diff, order mismatch (refused), or atomicity mismatch (refused).
+Diffs two Oovra files. The FORWARD-DIFF operator. Dispatches on the `kind` of each input into one of three outcomes: content diff (atom vs atom), structural diff (compound vs compound), or kind mismatch (refused). The compound-vs-compound diff is **sequence-aware** in v0.2 — reordering inputs is reported as a `moved` axis.
+
+> **v0.2 migration note** — v0.1's two-axis dispatch (order match + atomicity match) collapsed into a single kind-aware dispatch. `OrderMismatch` is gone; `AtomicityMismatch` is renamed `KindMismatch`. Structural diff gained `moved` and changed `added`/`removed` from `Vec<InputRef>` to `Vec<PositionedInput>`.
 
 ## Synopsis
 
 ```
 oovra compare <A> <B>                        # human-readable
 oovra compare <A> <B> --format json          # machine-readable
+oovra --legacy compare <A> <B>               # accept v0.1 files (transitional)
 ```
 
 ## Flags
@@ -16,38 +19,38 @@ oovra compare <A> <B> --format json          # machine-readable
 | `<A>` (positional)  | required         | First file (the "before" side in diff terms)            |
 | `<B>` (positional)  | required         | Second file (the "after" side)                          |
 | `--format <FMT>`    | `human`          | `human` for colored terminal output; `json` for tools  |
+| `--legacy` (global) | off              | Accept v0.1-schema files (with `order` instead of `kind`); v0.2-only by default |
 
 ---
 
-## The 4-way dispatch table
+## The dispatch table
 
-| `A.order == B.order`? | `A.is_atomic()` | `B.is_atomic()` | Result                                                                      |
-|-----------------------|-----------------|-----------------|-----------------------------------------------------------------------------|
-| no                    | (any)           | (any)           | Refused: [`OrderMismatch`](./errors.md#ordermismatch)                       |
-| yes                   | atomic          | atomic          | **Content diff**: body unified diff + metadata change list                  |
-| yes                   | composed        | composed        | **Structural diff**: added / removed / version-changed inputs over `composed_of` |
-| yes                   | atomic          | composed        | Refused: [`AtomicityMismatch`](./errors.md#atomicitymismatch)               |
-| yes                   | composed        | atomic          | Refused: same                                                               |
+| `A.kind`   | `B.kind`   | Result                                                                      |
+|------------|------------|-----------------------------------------------------------------------------|
+| `atom`     | `atom`     | **Content diff**: body unified diff + metadata change list                  |
+| `compound` | `compound` | **Structural diff**: added / removed / version-changed / moved over `composed_of` |
+| `atom`     | `compound` | Refused: [`KindMismatch`](./errors.md#kindmismatch)                         |
+| `compound` | `atom`     | Refused: same                                                               |
 
-In words: the two inputs must be at the **same logical order** AND **the same kind** (both atomic or both composed). The error messages are specific so an agent reading them can take the right action.
+In words: the two inputs must be the **same kind**. Mixed comparisons are refused cleanly.
 
 ---
 
-## Outcome 1: Content diff (atomic-vs-atomic)
+## Outcome 1: Content diff (atom vs atom)
 
-When both files are atomic and have the same `order` (= 0), Compare produces a **content diff**: a unified-diff-style report of body differences plus a list of metadata field changes.
+When both files are atoms, Compare produces a **content diff**: a unified-diff-style report of body differences plus a list of metadata field changes.
 
 ### What's reported
 
 - **Field changes**: any of `name`, `version`, `meta` that differ between A and B, shown as `<field>: <A-value> -> <B-value>`
 - **Body diff**: a standard unified diff (LCS-based, the same algorithm Git uses) over the body content. Lines that match are unchanged; lines beginning with `-` are removed, `+` are added, `@@` are hunk markers.
 
-The `id` field is **not** included in the field-change list — comparing two files with different IDs is a normal use case (comparing two versions of conceptually the same element saved under different filenames), and the IDs themselves would clutter the report.
+The `id` field is **not** included in the field-change list — comparing two files with different IDs is a normal use case (comparing two versions of conceptually the same element saved under different filenames).
 
 ### `--format human` output (example)
 
 ```
-Compare role-statement <-> role-clone  (order 0, content diff)
+Compare role-statement <-> role-clone  (atoms, content diff)
   metadata changes:
     version : 1.0.0 -> 2.0.0
     meta : Who the assistant is -> Refined role statement
@@ -79,52 +82,52 @@ Compare role-statement <-> role-clone  (order 0, content diff)
 
 ### Diff granularity: line-level, not word-level
 
-Compare uses [`similar::TextDiff::from_lines`](https://docs.rs/similar/latest/similar/struct.TextDiff.html#method.from_lines), the standard LCS-based line-oriented diff. The reasoning:
-
-- Prompt bodies are **paragraph-shaped**. Line-level diff matches the unit a human edits in.
-- Word-level diff over multi-line bodies produces visually noisy reports where a small edit looks like a wholesale rewrite.
-- Character-level diff is too granular for prose.
-
-Line-level matches the editing granularity, which is what makes the report useful in a code-review context.
+Compare uses [`similar::TextDiff::from_lines`](https://docs.rs/similar/latest/similar/struct.TextDiff.html#method.from_lines), the standard LCS-based line-oriented diff. Prompt bodies are paragraph-shaped — line-level diff matches the unit a human edits in. Word-level diff produces visually noisy reports for multi-line edits; character-level is too granular for prose.
 
 ---
 
-## Outcome 2: Structural diff (composed-vs-composed)
+## Outcome 2: Structural diff (compound vs compound) — sequence-aware
 
-When both files are composed and have the same `order`, Compare compares their **`composed_of` recipes** — not their rendered bodies. This is the architectural payoff of having an explicit recipe field: structural differences can be surfaced cleanly even when the bodies differ in many lines (timestamps, embedded prose updates, etc.).
+When both files are compounds, Compare compares their **`composed_of` recipes** — not their rendered bodies. This is the architectural payoff of having an explicit recipe field: structural differences can be surfaced cleanly even when the bodies differ in many lines (timestamps, embedded prose updates, etc.).
+
+In v0.2 the diff is **sequence-aware**: a reordered input is surfaced as a `moved` entry, not as a phantom add+remove. Reordering changes the rendered prompt, so a position change is a real diff axis.
 
 ### What's reported
 
-The recipe is treated as a **set keyed by ID** (not a sequence). For each input ID present in either A or B:
+Each input is classified along up to four axes:
 
-- If A has it at one version and B has it at a different version → `version_changed` entry
-- If only B has it → `added`
-- If only A has it → `removed`
-- If both have it at the same version → no entry (no difference for this input)
+- **`added`** — id present in B, absent in A. Reported with the position in B.
+- **`removed`** — id present in A, absent in B. Reported with the position in A.
+- **`version_changed`** — id present in both with different versions.
+- **`moved`** — id present in both with the same version but at a different position in `composed_of`.
 
-`recipes_equal` is true iff all three lists are empty.
+`version_changed` and `moved` are **not mutually exclusive**: an input that was both bumped *and* reordered surfaces on both lists.
 
-### `--format human` output (example)
+`recipes_equal` is true iff all four lists are empty.
 
-Two compositions where one input was version-bumped:
+### `--format human` output (example — version bump only)
 
 ```
-Compare pairing-prompt <-> pairing-prompt  (order 1, structural diff)
+Compare pairing-prompt <-> pairing-prompt  (compounds, structural diff)
   version-changed inputs:
     ~ role-statement : 1.0.0 -> 2.0.0
 ```
 
-A more complex example with additions and removals:
+### `--format human` output (example — add, remove, and reorder all at once)
 
 ```
-Compare full-agent <-> full-agent  (order 1, structural diff)
+Compare full-agent <-> full-agent  (compounds, structural diff)
   added inputs:
-    + format-rules @ 1.0.0
+    + [2] format-rules @ 1.0.0
   removed inputs:
-    - examples-discipline @ 1.0.0
+    - [0] examples-discipline @ 1.0.0
   version-changed inputs:
     ~ role-statement : 1.0.0 -> 1.1.0
+  moved inputs:
+    ↔ tone-direct @ 1.0.0 : pos 2 -> pos 0
 ```
+
+The `[N]` brackets after `+` and `-` show the position in the respective input list. The `↔` indicates a move with the old and new positions.
 
 ### `--format json` output (example)
 
@@ -133,86 +136,66 @@ Compare full-agent <-> full-agent  (order 1, structural diff)
   "kind": "structural",
   "a_id": "pairing-prompt",
   "b_id": "pairing-prompt",
-  "order": 1,
   "added": [
-    { "id": "format-rules", "version": "1.0.0" }
+    { "position": 2, "input": { "id": "format-rules", "version": "1.0.0" } }
   ],
   "removed": [
-    { "id": "examples-discipline", "version": "1.0.0" }
+    { "position": 0, "input": { "id": "examples-discipline", "version": "1.0.0" } }
   ],
   "version_changed": [
     { "id": "role-statement", "before_version": "1.0.0", "after_version": "1.1.0" }
+  ],
+  "moved": [
+    { "id": "tone-direct", "version": "1.0.0", "before_pos": 2, "after_pos": 0 }
   ],
   "recipes_equal": false
 }
 ```
 
-### Why this matters: the structural diff cuts through surface noise
+### Why sequence-awareness matters
 
-Two composed files can differ across many lines at the byte level (different `generated_at` timestamps, version strings repeated in `composed_of` and in embedded headers, body prose updated because an input was rewritten) while having **the same recipe-level meaning**. A naïve `diff` shows the byte-level noise. The structural diff answers the recipe-level question directly.
+In v0.1, the diff was order-blind: composing `[role, safety, tone]` then `[tone, safety, role]` produced two files that rendered different prompts but the diff reported `recipes_equal: true`. v0.2 fixes this — the reorder is a genuine semantic change because it changes the prompt the LLM sees.
 
-[demos/04-structural-diff](../demos/04-structural-diff/) shows the canonical example: two files that differ across 26 lines, summarized as "two inputs version-bumped, otherwise identical recipe."
+The id-based dispatch still cuts through surface byte-level noise (timestamps, embedded prose updates) — you get the recipe-level meaning, plus a clean `moved` signal when input order changes.
 
-### Set vs sequence: a deliberate v0.1 limitation
+### Duplicate-id limitation
 
-`composed_of` is treated as a set keyed by ID. **Reordering inputs is not reported as a diff.** If you compose `[role, safety, tone]` and then `[safety, role, tone]`, those produce different files (different body order), but their structural diff shows `recipes_equal: true`.
-
-Rationale: in v0.1 with one render mode (`markdown-h2`), input order is rendering metadata only. The recipe-equivalent question is "do these compositions reach the same set of inputs at the same versions" — set semantics give the right answer.
-
-If you care about positional order (e.g., for diffing across renders that ARE position-sensitive), use raw `diff` on the on-disk files instead. A `--ordered` flag for Compare is a v0.2+ consideration.
+The implementation builds id → (position, version) maps for each side. If the same id appears multiple times in a single `composed_of` array, the last occurrence wins in the maps, so moves involving duplicate-id inputs are not detected. Duplicate ids are rare (and arguably a smell) — a full LCS-based diff that handles duplicates is on the v0.3 roadmap.
 
 ---
 
-## Outcome 3: `OrderMismatch` (refused)
+## Outcome 3: `KindMismatch` (refused)
 
-When `A.order != B.order`, Compare refuses with:
-
-```
-Error: Cannot compare elements of different orders: 'A_ID' is order N, 'B_ID' is order M. Compare requires same-order inputs.
-```
-
-### Why refuse rather than attempt a cross-order diff?
-
-A cross-order diff is ambiguous. "Is this atomic A 'in' this composed B?" is a different question from "what changed between these two." There's no universally-right answer for a cross-order comparison, so Compare refuses cleanly and tells the user to fix the inputs.
-
-If you actually want to ask "what atomic leaves does B contain", use [`oovra decompose <B>`](./command-decompose.md) instead.
-
----
-
-## Outcome 4: `AtomicityMismatch` (refused)
-
-A subtle case: both files are at `order = 0`, but one is hand-authored (atomic, no `composed_of`) and the other was produced by `compose([single-input])` (composed, has `composed_of` with one entry).
-
-When `A.is_atomic() != B.is_atomic()`, Compare refuses with:
+When one input is an atom and the other is a compound, Compare refuses with:
 
 ```
-Error: Cannot compare an atomic element with a composed element: 'A_ID' is atomic, 'B_ID' is composed. Compare requires both inputs to be the same kind (both atomic or both composed).
+Error: Cannot compare an atom with a compound: 'A_ID' is an atom, 'B_ID' is a compound.
 ```
 
-### Why this case exists
+### Why refuse rather than attempt a cross-kind diff?
 
-Compose with a single input produces an `order = 0` file that **does** have a `composed_of` (just one entry). That file is semantically composed (has a recipe) but matches an atomic in logical order. Comparing it against a hand-authored atomic of the same order would be ambiguous: would you content-diff (since both are order 0) or structural-diff (since one has a recipe)?
+A cross-kind diff is ambiguous. Comparing an atom against a compound that contains it (or doesn't) raises a different question from "what changed between these two." There's no universally-right answer for a cross-kind comparison, so Compare refuses cleanly.
 
-Refusing cleanly is the right call. If you actually want to compare the rendered text of a composed-order-0 against an atomic, decompose the composed one first.
+If you want to ask "what atoms does this compound contain", use [`oovra decompose <compound>`](./command-decompose.md) instead. If you want to compare the rendered text of a compound against an atom's body, use `compose --text` to flatten the compound first.
 
 ---
 
 ## Failure modes
 
-Beyond the dispatch refusals listed above:
+Beyond the dispatch refusal listed above:
 
 | Trigger                                       | Error                                                                                       |
 |-----------------------------------------------|---------------------------------------------------------------------------------------------|
 | Either file does not exist                    | [`FileNotFound`](./errors.md#filenotfound) (path is reported)                              |
 | Either file fails to parse                    | The corresponding parse error ([`InvalidToml`](./errors.md#invalidtoml), [`MissingOpenDelimiter`](./errors.md#missingopendelimiter), etc.) |
-| Either file is missing `composed_of` when expected (would only happen if validator was bypassed) | [`OrderRequiresField`](./errors.md#orderrequiresfield)                                     |
+| Either file is a v0.1 file without `--legacy` | [`InvalidToml`](./errors.md#invalidtoml) ("missing field `kind`"). Run `oovra migrate` or pass `--legacy`. |
 
 ---
 
 ## See also
 
 - [schema.md](./schema.md) — what fields are diff'd
-- [order-and-delimiters.md](./order-and-delimiters.md) — `order` and `body_level` semantics
+- [kind-and-delimiters.md](./kind-and-delimiters.md) — `body_level` and `depth` semantics
 - [command-compose.md](./command-compose.md) — produces the files Compare diffs
 - [errors.md](./errors.md) — refusal error variants in detail
 - [demos/04-structural-diff](../demos/04-structural-diff/) — end-to-end demonstration of structural diff cutting through noise

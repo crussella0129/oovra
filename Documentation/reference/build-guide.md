@@ -1,16 +1,18 @@
 +++
-name = "Oovra Build Guide (v0.1, derived from working code)"
-order = 0
+name = "Oovra Build Guide (v0.2, derived from working code)"
+kind = "atom"
 id = "oovra-build-guide"
-version = "0.4.0"
-meta = "Step-by-step from-first-principles guide for building Oovra in Rust, derived from a working v0.1 codebase. Written for someone who has never written Rust."
+version = "0.5.0"
+meta = "Step-by-step from-first-principles guide for building Oovra in Rust, derived from the v0.2 codebase. Written for someone who has never written Rust."
 +++
 
 # Oovra Build Guide
 
 > An **œuvre** is a body of work — the collected output of a maker. Oovra (the phonetic spelling) treats system prompts as composed works: assembled from named, versioned **prompt elements** that form your personal corpus. Each prompt you ship is an entry in your œuvre.
 
-This is a **learn-by-doing** guide for building Oovra in Rust. It is derived from a complete working v0.1 implementation — every pattern below is in the codebase, and every tradeoff was decided in the act of building. Where the original spec said "do X," this guide says "do X, **here is what that actually looks like in Rust**, and here is **why** the alternative was rejected."
+> **v0.2 migration note.** This guide reflects the v0.2 schema: every element is either an **atom** (`kind = "atom"`, hand-authored) or a **compound** (`kind = "compound"`, produced by `oovra compose`). The v0.1 numeric `order` field has been replaced by `kind`. If you have v0.1 files on disk, run `oovra migrate <library-dir>` to convert them in place.
+
+This is a **learn-by-doing** guide for building Oovra in Rust. It is derived from a complete working v0.2 implementation — every pattern below is in the codebase, and every tradeoff was decided in the act of building. Where the original spec said "do X," this guide says "do X, **here is what that actually looks like in Rust**, and here is **why** the alternative was rejected."
 
 The build is in **four stages**, mirroring the four operators of the Sheet algebra you're porting:
 
@@ -66,7 +68,7 @@ If you've never written TOML, you need to know about five things:
 name = "Strict Refusal Policy"
 
 # 2. Integers and booleans — bare
-order = 0
+body_level = 1
 enabled = true
 
 # 3. Arrays — square brackets
@@ -94,19 +96,19 @@ Internalize these before writing code. They're load-bearing.
 
 **One file format only.** Every Oovra artifact is a `.md` file with TOML frontmatter delimited by `+++`. Not JSON. Not YAML. Not a second format. Preserve this ruthlessly.
 
-**One schema, not two.** Earlier drafts of the spec used a `kind` discriminator (`"node"` vs `"completed"`). The shipping design replaces both with a single struct, discriminated by a numeric `order` field. An `order = 0` element is what `kind = "node"` used to be; `order = 1` is what `kind = "completed"` used to be. The collapse buys us:
+**One schema, two kinds.** Every Oovra element is one struct discriminated by a `kind` string. `kind = "atom"` is a hand-authored element (no recipe). `kind = "compound"` is a composition produced by `oovra compose` (has a recipe). The collapse buys us:
 
-- One parser, one validator, one serializer. No tagged-enum branching at the type level.
-- Order generalizes naturally: orders 2, 3, 4 fall out for free.
-- The dispatching that *does* need to happen (Compare's content-vs-structural diff) reads one integer instead of switching on an enum.
+- One parser, one validator, one serializer. The kind enum is a small dispatch at the leaf of the codebase, not a type-level fork.
+- Compositional depth generalizes naturally — a compound's `body_level` and `depth` count *physical delimiter levels* and *recipe-tree height* respectively. Nothing in the schema caps depth at 1; deep compositions fall out for free.
+- The dispatching that *does* need to happen (Compare's content-vs-structural diff) reads one enum instead of branching on per-field presence.
 
-The cost: some fields (`composed_of`, `generated_at`, `render_mode`, `body_level`) are jointly required-or-forbidden depending on whether the element has a recipe. That constraint moves from the type system into a runtime validator. Acceptable.
+The cost: some fields (`composed_of`, `generated_at`, `render_mode`, `body_level`, `depth`) are jointly required-or-forbidden depending on the kind. That constraint moves from the type system into a runtime validator. Acceptable.
 
-**The body is the source of truth, the header is the cheap query path.** When Compose joins inputs, the body of the output contains the **complete file content** (frontmatter + body) of every input, wrapped in chiral delimiters. The header has a `composed_of` field listing immediate-input IDs and versions for fast lookup, but the body is what makes `decompose --full` losslessly recover every leaf. This is the property that lets you hand someone an order-23 file and have them reconstruct every element at every level with no library access.
+**The body is the source of truth, the header is the cheap query path.** When Compose joins inputs, the body of the output contains the **complete file content** (frontmatter + body) of every input, wrapped in chiral delimiters. The header has a `composed_of` field listing immediate-input IDs and versions for fast lookup, but the body is what makes `decompose --full` losslessly recover every leaf. This is the property that lets you hand someone a deeply-nested compound and have them reconstruct every element at every level with no library access.
 
 **Four operators, one binary.** `oovra create | compose | decompose | compare`. Validation is internal — there is no `validate` or `inspect` subcommand because `oovra compose --text <id>` already loads, validates, and prints any single element without writing anything to disk.
 
-> ★ **Insight — Body-tree vs header-tree.** Two competing places to store the recursion: the header (TOML inline tables, deeply nested) or the body (concatenated complete files, naturally self-similar). The body wins because TOML 1.0 inline tables can't span lines — a deeply nested `composed_of = [{...,composed_of=[{...,...}]}]` would be one thousand-character line at order 5. Moving the recursion into the body sidesteps the constraint entirely. The header always describes one level; the body describes all levels.
+> ★ **Insight — Body-tree vs header-tree.** Two competing places to store the recursion: the header (TOML inline tables, deeply nested) or the body (concatenated complete files, naturally self-similar). The body wins because TOML 1.0 inline tables can't span lines — a deeply nested `composed_of = [{...,composed_of=[{...,...}]}]` would be one thousand-character line at depth 5. Moving the recursion into the body sidesteps the constraint entirely. The header always describes one level; the body describes all levels.
 
 ---
 
@@ -121,17 +123,20 @@ This is the foundation. Every operator depends on it. Get it right.
 Before any code, write down the fields. From the working code's `src/header.rs`:
 
 ```rust
+pub enum PromptElementKind { Atom, Compound }
+
 pub struct PromptElementHeader {
     pub name: String,        // always required
-    pub order: u32,          // always required (logical depth)
+    pub kind: PromptElementKind, // always required ("atom" or "compound")
     pub id: String,          // always required, kebab-case
     pub version: String,     // always required, semver
     pub meta: String,        // always required, may be ""
 
-    // Required when composed_of is Some (and forbidden otherwise):
+    // Required when kind = "compound" (and forbidden when kind = "atom"):
     pub generated_at: Option<String>,         // RFC 3339
     pub render_mode: Option<String>,          // e.g. "markdown-h2"
-    pub body_level: Option<u32>,              // physical delimiter level
+    pub body_level: Option<u32>,              // physical delimiter level (>= 1)
+    pub depth: Option<u32>,                   // recipe-tree height (mirrors body_level)
     pub composed_of: Option<Vec<InputRef>>,
 }
 
@@ -141,18 +146,18 @@ pub struct InputRef {
 }
 ```
 
-Five always-required fields, four more for composed elements. The four "atomic" required fields (`name`, `order`, `id`, `version`) are the minimum identity of an element. `meta` is required as a field but may be empty — keeping the schema rectangular is cheaper than making it optional and dealing with the missing-vs-empty-string question downstream.
+Five always-required fields, five more for compounds. The required fields (`name`, `kind`, `id`, `version`, `meta`) are the minimum identity of an element. `meta` is required as a field but may be empty — keeping the schema rectangular is cheaper than making it optional and dealing with the missing-vs-empty-string question downstream.
 
-> ★ **Insight — Two integers, not one.** `order` and `body_level` look similar but answer different questions. `order` is the **logical compositional depth** computed by the user's count-based formula. `body_level` is the **physical delimiter level** used inside the body — always `max(input.order) + 1`. They coincide for the homogeneous case (`compose([0,0,0])` → both are `1`) but diverge for the mixed case (`compose([1, 0])` → `order = 1`, `body_level = 2`). The divergence is what keeps the body parser unambiguous — the outer delimiter always has strictly more tildes than any inner element's delimiter.
+> ★ **Insight — Two integers, not one.** `body_level` and `depth` look identical (they're numerically equal on every valid compound) but answer different questions. `body_level` is the **physical delimiter level** used inside the body — always `max(input.body_level, default = 0) + 1`, and it's what the body parser scans for. `depth` is a **human-friendly compositional-depth label** — `max(input.depth, default = 0) + 1`. They are exposed as separate fields so a future renderer can change the delimiter convention without renaming the metadata users read. For all the cases the v0.2 codebase produces, the two coincide; the duplication is intentional decoupling.
 
 #### 1.2 — Sketch one example of each kind
 
-Hand-write one order-0 file and one order-1 file in a notebook:
+Hand-write one atom and one compound in a notebook:
 
 ```toml
 +++
 name = "Strict Refusal Policy"
-order = 0
+kind = "atom"
 id = "refusal-policy-strict"
 version = "1.0.0"
 meta = "Brief, non-preachy decline of harmful requests."
@@ -221,9 +226,9 @@ Module layout (each gets its own file in `src/`):
 | `header` | `PromptElementHeader`, `InputRef`, validators |
 | `element` | parser, splitter, serializer, body delimiter functions |
 | `library` | recursive directory loader |
-| `render` | Compose pipeline + `compute_order` |
+| `render` | Compose pipeline + `compute_body_level` + `compute_depth` |
 | `decompose` | one-level + `--full` recursive folder writer |
-| `diff` | Compare with order- and atomicity-aware dispatch |
+| `diff` | Compare with kind-aware dispatch |
 | `create` | scaffold + label |
 | `lib` | public re-exports |
 | `main` | clap-derive CLI |
@@ -237,6 +242,13 @@ The header struct uses serde derive to handle TOML round-tripping:
 ```rust
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PromptElementKind {
+    Atom,
+    Compound,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InputRef {
     pub id: String,
@@ -246,7 +258,7 @@ pub struct InputRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptElementHeader {
     pub name: String,
-    pub order: u32,
+    pub kind: PromptElementKind,
     pub id: String,
     pub version: String,
     #[serde(default)]
@@ -262,16 +274,19 @@ pub struct PromptElementHeader {
     pub body_level: Option<u32>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composed_of: Option<Vec<InputRef>>,
 }
 ```
 
 Two important serde annotations:
 
-- `#[serde(default)]` on `meta` lets the field be omitted from TOML and still deserialize (using `String::default()`, i.e. `""`). Without this, an order-0 file missing `meta` would fail to parse.
-- `#[serde(default, skip_serializing_if = "Option::is_none")]` on all four conditional fields means: deserialize as `None` when missing, and *omit entirely* when serializing if `None`. Without `skip_serializing_if`, serde would emit them as TOML `null` (which TOML doesn't have, so it'd error).
+- `#[serde(default)]` on `meta` lets the field be omitted from TOML and still deserialize (using `String::default()`, i.e. `""`). Without this, an atom missing `meta` would fail to parse.
+- `#[serde(default, skip_serializing_if = "Option::is_none")]` on all five conditional fields means: deserialize as `None` when missing, and *omit entirely* when serializing if `None`. Without `skip_serializing_if`, serde would emit them as TOML `null` (which TOML doesn't have, so it'd error).
 
-> ★ **Insight — Why `Option<T>` with `skip_serializing_if`.** This pattern is how you express "this field exists for some elements and not others" in a single struct without resorting to a tagged enum. The runtime validator (Step 1.6) enforces the joint invariant "`composed_of.is_some()` implies all four companion fields are present, otherwise all are absent and `order == 0`" — the type system can't express it directly, but the validator covers it before the struct is handed to anyone.
+> ★ **Insight — Why `Option<T>` with `skip_serializing_if`.** This pattern is how you express "this field exists for some elements and not others" in a single struct without resorting to a tagged enum. The runtime validator (Step 1.6) enforces the joint invariant "`kind = Compound` implies all five companion fields are present; `kind = Atom` requires all five absent" — the type system can't express it directly, but the validator covers it before the struct is handed to anyone.
 
 Then a small companion `PromptElement` type that pairs the header with the body:
 
@@ -289,7 +304,7 @@ The parser is a four-step pipeline:
 
 1. **Split frontmatter from body.** Scan for `+++` lines.
 2. **Parse the frontmatter as TOML.** `toml::from_str` into `PromptElementHeader`.
-3. **Validate semantics.** Kebab-case, semver, RFC 3339, order-required-fields, non-empty body.
+3. **Validate semantics.** Kebab-case, semver, RFC 3339, kind-required-fields, non-empty body.
 4. **Return a `PromptElement`** with everything attached.
 
 The split is purely lexical:
@@ -384,27 +399,22 @@ fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Res
         return Err(OovraError::EmptyBody(path.to_path_buf()));
     }
 
-    // Joint invariant: composed elements have all four companion fields;
-    // atomic elements have none of them, AND must be order 0.
-    if header.is_composed() {
-        // composed_of is Some — generated_at, render_mode, body_level all required
+    // Joint invariant: compounds have all five companion fields; atoms have
+    // none of them. Kind drives the dispatch.
+    if header.is_compound() {
+        // composed_of is Some — generated_at, render_mode, body_level, depth all required
         let generated_at = header.generated_at.as_deref()
-            .ok_or_else(|| OovraError::OrderRequiresField { /* ... */ })?;
+            .ok_or_else(|| OovraError::CompoundMissingField { /* ... */ })?;
         if !is_valid_rfc3339(generated_at) { /* error */ }
-        // render_mode, body_level required; composed_of must be non-empty;
+        // render_mode, body_level, depth required; composed_of must be non-empty;
         // every composed_of entry must have kebab-case id and semver version.
     } else {
-        // composed_of is None — this MUST be a hand-authored order-0 file
-        if header.order != 0 {
-            return Err(OovraError::HandAuthoredHigherOrder {
-                path: path.to_path_buf(),
-                order: header.order,
-            });
-        }
-        // Companion fields must also all be None
+        // kind = Atom — all five companion fields must be None
         if header.generated_at.is_some()
             || header.render_mode.is_some()
             || header.body_level.is_some()
+            || header.depth.is_some()
+            || header.composed_of.is_some()
         {
             return Err(OovraError::InvalidField { /* ... */ });
         }
@@ -414,9 +424,9 @@ fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Res
 }
 ```
 
-The two-arm structure encodes a **joint invariant**: either you have a recipe (and all four companion fields are set, and `order` is whatever the formula gave you), or you don't (and `order == 0` and all four companions are absent). Anything else is rejected.
+The two-arm structure encodes a **joint invariant**: a compound has all five companion fields set (with a real recipe); an atom has none of them. Anything else is rejected.
 
-> ★ **Insight — Why the joint invariant beats per-field optionality.** Without the `else` branch, an attacker (or a confused agent) could write a file with `order = 5` and no `composed_of` — claiming a high compositional depth without any recipe to back it up. Decompose would refuse, but only when called; in the meantime the file would sit in libraries pretending to be something it isn't, breaking dependent agents' assumptions about compositional depth. The `HandAuthoredHigherOrder` rejection makes that whole class of confusion impossible at parse time.
+> ★ **Insight — Why the joint invariant beats per-field optionality.** Without the `else` branch, an attacker (or a confused agent) could write a file with `kind = "atom"` but a `composed_of` array stuffed full of dangling references — claiming atom-ness while carrying compound machinery. Decompose would either misbehave or refuse, but only when called; in the meantime the file would sit in libraries with two contradictory descriptions of what it is. The rejection-on-mixed-fields rule makes that whole class of confusion impossible at parse time.
 
 The three validators are tiny:
 
@@ -568,18 +578,19 @@ The simplest operator. Building it first proves the parse-validate-serialize loo
 pub fn scaffold(args: ScaffoldArgs) -> Result<PathBuf> {
     let header = PromptElementHeader {
         name: args.name.unwrap_or_else(|| args.id.clone()),
-        order: 0,
+        kind: PromptElementKind::Atom,
         id: args.id.clone(),
         version: args.version,
         meta: args.meta,
         generated_at: None,
         render_mode: None,
         body_level: None,
+        depth: None,
         composed_of: None,
     };
     let body = format!(
         "<!-- TODO: write the prompt body for `{}` here. \
-         This element is order 0 — atomic, internally consistent, portable. -->",
+         This element is an atom — internally consistent, portable. -->",
         args.id
     );
     let element = PromptElement::new(header, body);
@@ -589,7 +600,7 @@ pub fn scaffold(args: ScaffoldArgs) -> Result<PathBuf> {
 }
 ```
 
-Both modes always produce `order = 0` with no recipe (`composed_of: None`). There is no way to scaffold a higher-order element by hand — that's `compose`'s job. This is a deliberate constraint: the validator (Step 1.6) actively rejects any hand-authored file claiming `order > 0` without a recipe (`HandAuthoredHigherOrder` error). Note the four `Option<T>` companion fields on the header (`generated_at`, `render_mode`, `body_level`, `composed_of`) are *all* `None` here — the validator rejects any subset being `Some` for an atomic element, keeping the schema rectangular.
+Both modes always produce atoms (`kind = "atom"`, no recipe). There is no way to scaffold a compound by hand — that's `compose`'s job. This is a deliberate constraint: the validator (Step 1.6) actively rejects any hand-authored file that claims `kind = "compound"` without a recipe (or `kind = "atom"` with companion fields populated). Note the five `Option<T>` companion fields on the header (`generated_at`, `render_mode`, `body_level`, `depth`, `composed_of`) are *all* `None` here — the validator rejects any subset being `Some` for an atom, keeping the schema rectangular.
 
 The original spec said Create should "delete the file on failure to parse." The shipped implementation goes one step better: it validates the would-be file content *in memory* before any `fs::write` happens, so a failure leaves nothing on disk to clean up. The original "delete on failure" approach has a TOCTOU window between write and delete; the in-memory pre-check has none.
 
@@ -636,44 +647,38 @@ This is the JOIN/SPLIT pair from your sheet, lifted to typed structures.
 
 #### 3.1 — Compose's input and output
 
-`Compose` takes a list of input IDs (with optional version pins) and a library reference. It produces one composed element. Three output modes:
+`Compose` takes a list of input IDs (with optional version pins) and a library reference. It produces one compound element. Three output modes:
 
 | Mode | Flag | Output |
 |---|---|---|
 | File (default) | (none) | A complete Oovra file written to disk |
 | Text | `--text` | Clean H2-formatted prompt printed to stdout (NOT a valid Oovra file) |
-| Re-render | `--re-render <path>` | Read existing composed file's recipe, re-resolve against current library, overwrite body |
+| Re-render | `--re-render <path>` | Read existing compound file's recipe, re-resolve against current library, overwrite body |
 
-#### 3.2 — The order calculator
+#### 3.2 — The size calculators
 
-This is the most distinctive part of Oovra:
+Compose computes two numbers from its inputs. Both use the same strict-escalation rule: take the max of the corresponding input field (treating absent fields as 0 — atoms have no `body_level` or `depth` on disk) and add one.
 
 ```rust
-pub fn compute_order(orders: &[u32]) -> u32 {
-    if orders.is_empty() {
-        return 0;
-    }
-    let highest = orders.iter().copied().max().unwrap_or(0);
-    let count_at_highest = orders.iter().filter(|&&o| o == highest).count();
-    if count_at_highest > 1 {
-        highest + 1
-    } else {
-        highest
-    }
+pub fn compute_body_level(input_body_levels: &[u32]) -> u32 {
+    input_body_levels.iter().copied().max().map(|m| m + 1).unwrap_or(1)
+}
+
+pub fn compute_depth(input_depths: &[u32]) -> u32 {
+    input_depths.iter().copied().max().map(|m| m + 1).unwrap_or(1)
 }
 ```
 
-They encode the rule: **you only climb to a higher order when at least two inputs are peers at the maximum input order.** This means:
+Both are well-defined on every input shape:
 
-- `compute_order(&[0, 0, 0])` = 1 — three peers at order 0, climb
-- `compute_order(&[1, 1])` = 2 — two peers at order 1, climb
-- `compute_order(&[1, 0, 0, 0])` = 1 — one input at order 1, no peer, no climb
-- `compute_order(&[2, 1, 0, 0, 0, 0, 0])` = 2 — one input at order 2, no peer, no climb
-- `compute_order(&[2, 2, 1])` = 3 — two peers at order 2, climb
+- `compute_body_level(&[0, 0, 0])` = 1 — three atoms, output is body_level 1
+- `compute_body_level(&[1, 1])` = 2 — two body_level-1 compounds, output is body_level 2
+- `compute_body_level(&[1, 0, 0, 0])` = 2 — one body_level-1 compound plus three atoms; output strictly escalates
+- `compute_body_level(&[2, 1, 0, 0, 0, 0, 0])` = 3 — mixed inputs, strict escalation off the max
 
-The order tracks **compositional depth**, not flat aggregation count. This is doing real conceptual work — flat aggregations of mostly low-order content don't promote, but genuine peer composition does.
+The strict-escalation rule is what keeps the on-disk delimiter scheme unambiguous: the outer parser scans for exactly `body_level + 1` tildes, and inner chunks (with strictly fewer tildes) are inert text. See [kind-and-delimiters.md](./kind-and-delimiters.md).
 
-> ★ **Insight — Why `count > 1` and not `>= 1`.** With `>= 1`, every Compose call would promote the order — feeding one order-1 plus a hundred order-0's would yield order 2, which is meaningless because no actual peer composition happened at the top level. The `> 1` rule says "you only climb when at least two genuine peers exist at the maximum order."
+> ★ **Insight — `depth` and `body_level` are the same number on disk, exposed under two names.** This is intentional decoupling for future flexibility: a future renderer might count physical delimiter levels differently from recipe-tree height (e.g. by combining chunks within a single delimiter envelope). Exposing both lets downstream tooling read whichever number it cares about without leaking the convention.
 
 #### 3.3 — The resolver
 
@@ -697,11 +702,11 @@ for (id, pin) in &req.inputs {
 }
 ```
 
-**Pin semantics for v0.1: exact-string match.** Don't implement semver range matching (`^1.2.0`, `>=1.0.0, <2.0.0`) until you actually need it. The `semver` crate is in your dependencies for when you do; YAGNI until then.
+**Pin semantics in v0.2: exact-string match.** Don't implement semver range matching (`^1.2.0`, `>=1.0.0, <2.0.0`) until you actually need it. The `semver` crate is in your dependencies for when you do; YAGNI until then.
 
 #### 3.4 — The body renderer (the load-bearing part)
 
-The body of a composed element is the **concatenation of full-file content of each input, wrapped in chiral level-aware delimiters**. This is what makes the file losslessly self-describing.
+The body of a compound element is the **concatenation of full-file content of each input, wrapped in chiral level-aware delimiters**. This is what makes the file losslessly self-describing.
 
 Delimiter functions:
 
@@ -717,15 +722,11 @@ pub fn body_delimiter_close(body_level: u32) -> String {
 
 Level-1 delimiters: `~~>>` / `~~<<`. Level 2: `~~~>>` / `~~~<<`. Level N: `(N+1)` tildes + chiral suffix. The suffix is chiral so open and close can never be confused; the tilde count is strictly monotonic so an outer parser scanning for level-N ignores inner level-(N−k).
 
-The `body_level` for a Compose output is computed independently of the logical order. It's always `max(input.order) + 1` — *not* the output's order. This is the key correctness fix: when the user's order formula yields `output_order == max(input.order)` (the count-at-max == 1 case), using `output_order` as the delimiter level would cause a collision with inner delimiters. Using `max + 1` always escalates.
+The `body_level` for a Compose output is `max(input.body_level, default = 0) + 1`. Atoms contribute `0` (they have no `body_level` on disk). The strict-escalation rule means the outer delimiter always has strictly more tildes than any inner element's body delimiter — that is what makes recursive decomposition unambiguous.
 
-```rust
-pub fn compute_body_level(orders: &[u32]) -> u32 {
-    orders.iter().copied().max().map(|m| m + 1).unwrap_or(1)
-}
-```
+(The `compute_body_level` helper itself was defined in [Section 3.2](#32--the-size-calculators); the renderer simply consumes its result.)
 
-The renderer takes `body_level` directly — not the output order:
+The renderer takes `body_level` directly:
 
 ```rust
 fn wrap_chunk(body_level: u32, full_file_content: &str) -> String {
@@ -745,7 +746,7 @@ pub fn render_body(body_level: u32, input_files: &[String]) -> String {
 
 For each input, **`serialize(input)` to get its complete file string** (frontmatter + body), wrap it in level-`body_level` delimiters, join all chunks with newlines.
 
-> ★ **Insight — The escalation rule does the real work, and `body_level` is what enforces it.** The outer file's delimiter always has strictly more tildes than any embedded element's body delimiter. The outer parser scans for `(body_level + 1)` tildes — inner delimiters with fewer tildes are inert text. This is what makes the recursive splitting unambiguous regardless of order. **The bug this fixes**: an earlier version used `output.order` as the delimiter level, which broke for `compose([order-1, order-0])` because `output.order == 1 == inner.body_level`, causing a collision. Decoupling the two integers fixes it.
+> ★ **Insight — The escalation rule does the real work, and `body_level` is what enforces it.** The outer file's delimiter always has strictly more tildes than any embedded element's body delimiter. The outer parser scans for `(body_level + 1)` tildes — inner delimiters with fewer tildes are inert text. This is what makes the recursive splitting unambiguous regardless of depth. **The bug history**: an earlier (v0.1) version conflated two distinct quantities — a count-based "logical order" and the physical delimiter level — into a single `order` field. When the count-based formula produced a value that did not strictly exceed `max(input.order)`, the outer delimiter collided with inner delimiters. v0.2 dropped the count-based formula entirely; `body_level` strictly escalates by construction, and the field doubles as the "compositional depth" label.
 
 #### 3.5 — Stitching it all together
 
@@ -765,12 +766,16 @@ pub fn compose(req: ComposeRequest<'_>) -> Result<PromptElement> {
         input_refs.push(InputRef::new(id.clone(), element.header.version.clone()));
     }
 
-    // 2. Compute logical order AND physical body delimiter level. Distinct.
-    let input_orders: Vec<u32> = resolved.iter().map(|e| e.header.order).collect();
-    let output_order = compute_order(&input_orders);
-    let body_level = compute_body_level(&input_orders);
+    // 2. Compute body_level (physical delimiter level) and depth (recipe tree height).
+    //    Both follow the strict-escalation rule. Atoms contribute 0 in both calculations.
+    let input_body_levels: Vec<u32> =
+        resolved.iter().map(|e| e.header.body_level.unwrap_or(0)).collect();
+    let input_depths: Vec<u32> =
+        resolved.iter().map(|e| e.header.depth.unwrap_or(0)).collect();
+    let body_level = compute_body_level(&input_body_levels);
+    let depth = compute_depth(&input_depths);
 
-    // 3. Render the body using body_level (NOT output_order)
+    // 3. Render the body using body_level
     let mut input_files: Vec<String> = Vec::with_capacity(resolved.len());
     for input in &resolved {
         input_files.push(serialize(input)?);
@@ -780,13 +785,14 @@ pub fn compose(req: ComposeRequest<'_>) -> Result<PromptElement> {
     // 4. Construct the header
     let header = PromptElementHeader {
         name: req.output_name,
-        order: output_order,
+        kind: PromptElementKind::Compound,
         id: req.output_id,
         version: req.output_version,
         meta: req.output_meta,
         generated_at: Some(Utc::now().to_rfc3339()),
         render_mode: Some("markdown-h2".to_string()),
         body_level: Some(body_level),
+        depth: Some(depth),
         composed_of: Some(input_refs),
     };
 
@@ -794,7 +800,7 @@ pub fn compose(req: ComposeRequest<'_>) -> Result<PromptElement> {
 }
 ```
 
-Four-step pipeline: resolve, compute-both-integers, render-with-body-level, build-header. The split into two integers is what fixes the mixed-order-collision bug — the on-disk delimiter level always escalates strictly, even when the user-facing logical order does not.
+Four-step pipeline: resolve, compute-both-integers, render-with-body-level, build-header. The strict-escalation rule on `body_level` ensures the on-disk delimiter level always escalates, eliminating the mixed-input delimiter collision that an earlier (v0.1) count-based formula was vulnerable to.
 
 #### 3.6 — Decompose
 
@@ -802,16 +808,15 @@ Decompose is the inverse, and it's almost trivial because the body is already st
 
 ```rust
 pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
-    if element.header.is_atomic() {
-        return Err(OovraError::CannotDecomposeAtomic {
+    if element.header.is_atom() {
+        return Err(OovraError::CannotDecomposeAtom {
             id: element.header.id.clone(),
         });
     }
 
     let body_level = element.header.body_level.ok_or_else(|| {
-        OovraError::OrderRequiresField {
+        OovraError::CompoundMissingField {
             id: element.header.id.clone(),
-            order: element.header.order,
             field: "body_level",
         }
     })?;
@@ -867,11 +872,11 @@ fn write_recursive(element: &PromptElement, dir: &Path) -> Result<()> {
     let element_path = dir.join(format!("{}.md", element.header.id));
     fs::write(&element_path, serialize(element)?)?;
 
-    if element.header.is_atomic() { return Ok(()); }
+    if element.header.is_atom() { return Ok(()); }
 
-    // For each immediate input, write it directly (atomic leaf) or recurse (composed sub-tree)
+    // For each immediate input, write it directly (atom leaf) or recurse (compound sub-tree)
     for input in decompose(element)? {
-        if input.header.is_atomic() {
+        if input.header.is_atom() {
             fs::write(dir.join(format!("{}.md", input.header.id)), serialize(&input)?)?;
         } else {
             let sub_dir = dir.join(&input.header.id);
@@ -883,7 +888,7 @@ fn write_recursive(element: &PromptElement, dir: &Path) -> Result<()> {
 }
 ```
 
-For an order-2 file with two order-1 inputs, you get:
+For a `body_level = 2` compound with two `body_level = 1` inputs, you get:
 
 ```
 out/<root-id>/
@@ -898,9 +903,9 @@ out/<root-id>/
     └── <leaf-d>.md
 ```
 
-Order-0 leaves are flat `.md` files (nothing to recurse into). Order-≥1 elements get their own subdirectory.
+Atoms are flat `.md` files (nothing to recurse into). Compounds get their own subdirectory.
 
-> ★ **Insight — The recursion is a self-similar fixed-point.** The body parser splits at level-N delimiters and re-runs the *same* file parser on each chunk. There's no special-casing per order, no recursion depth limit (other than Rust's stack), no separate "high-order parser." `parse` is `parse` whether the chunk is order 0 or order 23.
+> ★ **Insight — The recursion is a self-similar fixed-point.** The body parser splits at level-N delimiters and re-runs the *same* file parser on each chunk. There's no special-casing per kind, no recursion depth limit (other than Rust's stack), no separate "deep parser." `parse` is `parse` whether the chunk is an atom or a deeply-nested compound.
 
 #### 3.7 — The `--text` renderer (a different problem)
 
@@ -915,10 +920,10 @@ pub fn render_text(inputs: &[&PromptElement]) -> Result<String> {
 }
 
 fn render_for_paste(element: &PromptElement) -> Result<String> {
-    if element.header.is_atomic() {
+    if element.header.is_atom() {
         return Ok(format!("## {}\n\n{}", element.header.id, element.body.trim()));
     }
-    // Composed: descend recursively, flattening to a list of order-0 leaves
+    // Compound: descend recursively, flattening to a list of atom leaves
     let subs = crate::decompose::decompose(element)?;
     let parts: Vec<String> = subs.iter().map(render_for_paste).collect::<Result<Vec<_>>>()?;
     Ok(parts.join("\n\n"))
@@ -929,49 +934,41 @@ Two renderers, two purposes:
 - `render_body` produces the on-disk Oovra-format body (with delimiters, for round-tripping).
 - `render_text` produces a human-pasteable prompt (no delimiters, just H2-formatted prose).
 
-The original spec called this "render mode." For v0.1, `render_body` is hardcoded to the Oovra-delimited form (the only on-disk form supported), and `render_text` is hardcoded to the H2 form. v0.2 might add a `--render-mode=claude-xml` to get `<role>...</role>` wrapping. The two-renderer design makes that an additive change, not a refactor.
+The original spec called this "render mode." `render_body` is hardcoded to the Oovra-delimited form (the only on-disk form supported), and `render_text` is hardcoded to the H2 form. A future version might add a `--render-mode=claude-xml` to get `<role>...</role>` wrapping. The two-renderer design makes that an additive change, not a refactor.
 
 ---
 
 ### Stage 4 — Compare
 
-The FORWARD-DIFF operator with **two-axis dispatch**: orders must match, AND atomicity must match.
+The FORWARD-DIFF operator with **kind-aware dispatch**: an atom can only be compared against an atom, and a compound against a compound.
 
-#### 4.1 — Four comparison cases
+#### 4.1 — Three comparison cases
 
 Compare's first job is dispatching:
 
 ```rust
 pub fn compare(a: &PromptElement, b: &PromptElement) -> Result<DiffReport> {
-    if a.header.order != b.header.order {
-        return Err(OovraError::OrderMismatch {
-            a_id: a.header.id.clone(), a_order: a.header.order,
-            b_id: b.header.id.clone(), b_order: b.header.order,
-        });
-    }
-
-    match (a.header.is_atomic(), b.header.is_atomic()) {
-        (true, true) => Ok(DiffReport::Content(content_diff(a, b))),
+    match (a.header.is_atom(), b.header.is_atom()) {
+        (true, true)   => Ok(DiffReport::Content(content_diff(a, b))),
         (false, false) => Ok(DiffReport::Structural(structural_diff(a, b)?)),
-        (a_atomic, _) => Err(OovraError::AtomicityMismatch {
+        (a_atom, _) => Err(OovraError::KindMismatch {
             a_id: a.header.id.clone(),
-            a_kind: if a_atomic { "atomic" } else { "composed" },
+            a_kind: if a_atom { "atom" } else { "compound" },
             b_id: b.header.id.clone(),
-            b_kind: if a_atomic { "composed" } else { "atomic" },
+            b_kind: if a_atom { "compound" } else { "atom" },
         }),
     }
 }
 ```
 
-Four paths:
-- **Same order, both atomic** → content diff (body unified diff + metadata changes).
-- **Same order, both composed** → structural diff over `composed_of` (added / removed / version-changed).
-- **Different orders** → `OrderMismatch` error.
-- **Same order, mixed atomicity** → `AtomicityMismatch` error.
+Three paths:
+- **Both atoms** → content diff (body unified diff + metadata changes).
+- **Both compounds** → structural diff over `composed_of` (added / removed / version-changed).
+- **Mixed kinds** → `KindMismatch` error.
 
-> ★ **Insight — Why atomicity needs its own dispatch axis.** Earlier this code only branched on `a.header.is_atomic()` after the order check, implicitly assuming both inputs would be atomic-iff-order-zero. That assumption broke when we allowed `compose([single-input])` — which can produce a composed *order-0* element. Two order-0 files now have two distinct shapes (atomic vs composed), and the diff code must distinguish them. The fix is the `match (a.is_atomic(), b.is_atomic())` 2x2 — without it, a composed order-0 compared against an atomic order-0 would silently route to `content_diff` and panic when it tried to read non-existent `composed_of` fields, or worse, produce a misleading "no metadata changes" report.
+> ★ **Insight — Why `kind` is the single dispatch axis (v0.2 simplification).** v0.1 carried a separate `order` integer and had to check both "orders match" and "kinds match" before routing to the right diff. In practice, two atoms compared at "different orders" never happens (atoms are always order 0), and a kind-mismatch already explains every interesting mismatch case. v0.2 collapses dispatch to a single `kind` match. The earlier two-axis check is gone, and the codebase is the smaller for it.
 
-#### 4.2 — Content diff (atomic elements)
+#### 4.2 — Content diff (atoms)
 
 Use the `similar` crate for the body unified diff:
 
@@ -995,7 +992,7 @@ fn content_diff(a: &PromptElement, b: &PromptElement) -> ContentDiff {
 
 > ★ **Insight — Why LCS-based diff (`similar`) instead of word-level or character-level.** Prompt bodies are paragraph-shaped. Line-level diff matches the unit a human author edits in. Word-level diff over multi-line bodies produces visually noisy reports where a small edit looks like a wholesale rewrite. Match the diff granularity to the editing granularity.
 
-#### 4.3 — Structural diff (composed elements)
+#### 4.3 — Structural diff (compounds)
 
 This is where Compare earns its keep. The structural diff operates on the `composed_of` arrays:
 
@@ -1037,7 +1034,7 @@ Hash-by-id lookup in O(1) per input. Three categories:
 
 This is the diff that makes "two compositions whose rendered bodies are wildly different" reveal themselves as "actually identical except for one input version bump." That's the core architectural payoff: **structural similarity through surface noise**.
 
-> ★ **Insight — Why this is a set-difference, not a sequence-diff.** We treat `composed_of` as a set keyed by ID, not a sequence. Reordering the inputs is not reported as a diff — Compare answers "what's different about the *recipe*," and order-of-inputs is rendering-only metadata. v0.2 might add a `--ordered` flag to detect reorders, but for v0.1 the set-based answer is the load-bearing one.
+> ★ **Insight — Why this is a set-difference, not a sequence-diff.** We treat `composed_of` as a set keyed by ID, not a sequence. Reordering the inputs is not reported as a diff — Compare answers "what's different about the *recipe*," and sequence-of-inputs is rendering-only metadata. A future version might add a `--ordered` flag to detect reorders, but for now the set-based answer is the load-bearing one.
 
 #### 4.4 — Wire Compare to the CLI
 
@@ -1073,7 +1070,7 @@ Use `owo-colors` for the green/red/yellow coding. `serde_json::to_string_pretty(
 
 The integration test `compare_structural_diff_detects_version_change` does the full loop:
 
-1. Compose two inputs into an order-1.
+1. Compose two atom inputs into a compound (`body_level = 1`).
 2. Stage a modified library where one input's version is bumped.
 3. Compose the *same* input IDs again against the modified library.
 4. `compare(v1, v2)` must report exactly one version change and no add/remove.
@@ -1084,7 +1081,7 @@ If this test passes, your structural diff is doing what it claims to do. The two
 
 ## Part 3 — Stop and Use It
 
-You now have a working v0.1. Take a system prompt you actually use — for a coding agent, an Obsidian vault helper, whatever — and break it into elements. Use `oovra create` to scaffold them. Use `oovra compose` to assemble them. Use `oovra compare` to diff against your old hand-written version.
+You now have a working build. Take a system prompt you actually use — for a coding agent, an Obsidian vault helper, whatever — and break it into elements. Use `oovra create` to scaffold them. Use `oovra compose` to assemble them. Use `oovra compare` to diff against your old hand-written version.
 
 **Use the tool for two weeks before adding any features.** The features you imagined needing will turn out to be wrong; the features you actually need will reveal themselves through use.
 
@@ -1111,11 +1108,11 @@ oovra/
 │   ├── header.rs          # PromptElementHeader, InputRef, validators
 │   ├── element.rs         # parser, splitter, serializer, body delimiters
 │   ├── library.rs         # Library loader
-│   ├── render.rs          # Compose, compute_order, render_body, render_text
+│   ├── render.rs          # Compose, compute_body_level, compute_depth, render_body, render_text
 │   ├── decompose.rs       # decompose, decompose_full, report
-│   ├── diff.rs            # Compare with order- and atomicity-aware dispatch
+│   ├── diff.rs            # Compare with kind-aware dispatch
 │   └── create.rs          # scaffold, label
-├── elements/              # 5 sample order-0 elements
+├── elements/              # 5 sample atoms
 │   ├── role-declaration.md
 │   ├── refusal-policy-strict.md
 │   ├── output-format-markdown.md
@@ -1129,9 +1126,9 @@ Total: roughly 2,000 lines of Rust + 450 lines of integration test + 5 small Mar
 
 ## Appendix B — Test Strategy
 
-**Unit tests** (`#[cfg(test)] mod tests { ... }` inside each source file): test pure functions. `compute_order` against the spec's example table. `compute_body_level` against the same input cases (both equal-and-divergent). `is_kebab_case` against valid and invalid IDs. `body_delimiter_open` against expected outputs at multiple levels. `parse` round-tripping a minimal file. These tests run in milliseconds and you should run them on every save.
+**Unit tests** (`#[cfg(test)] mod tests { ... }` inside each source file): test pure functions. `compute_body_level` and `compute_depth` against tabulated input cases. `is_kebab_case` against valid and invalid IDs. `body_delimiter_open` against expected outputs at multiple levels. `parse` round-tripping a minimal file. These tests run in milliseconds and you should run them on every save.
 
-**Integration tests** (`tests/end_to_end.rs`): test the full pipeline. Compose 3 order-0 elements into an order-1; assert the body contains all expected input IDs. Compose 2 order-1 elements into an order-2; assert both `~~>>` (level 1) AND `~~~>>` (level 2) appear in the body — this is the escalation rule under test. `decompose_full` an order-2 element and assert the folder tree has the exact expected structure with full metadata-preservation on every leaf. The mixed-order regression test (`mixed_order_compose_does_not_collide_with_inner_delimiters`) specifically exercises the previously-broken case where the user's `order` formula returns a value that does NOT climb above the input maximum — the case that exposed the body-level conflation bug.
+**Integration tests** (`tests/end_to_end.rs`): test the full pipeline. Compose 3 atoms into a `body_level = 1` compound; assert the body contains all expected input IDs. Compose 2 `body_level = 1` compounds into a `body_level = 2` compound; assert both `~~>>` (level 1) AND `~~~>>` (level 2) appear in the body — this is the strict-escalation rule under test. `decompose_full` a `body_level = 2` element and assert the folder tree has the exact expected structure with full metadata-preservation on every leaf. The mixed-input regression test (`mixed_order_compose_does_not_collide_with_inner_delimiters`) specifically exercises a compound whose inputs include both a compound and several atoms — the case that exposed the v0.1 body-level conflation bug.
 
 The integration tests are the load-bearing proof that the architecture works. If they pass, the system does what it claims.
 
@@ -1139,22 +1136,22 @@ The integration tests are the load-bearing proof that the architecture works. If
 
 This is the list of bugs that were caught and fixed during construction. They're useful to read because they show what kinds of mistakes are easy to make and how the architecture either let them through or surfaced them.
 
-**1. Body delimiter level conflated with logical order.**
-*Symptom:* `compose([order-1, order-0])` produced a file that `decompose` couldn't parse — the outer `~~>>` collided with the inner element's body delimiters.
-*Root cause:* the original code used `output.order` as the body delimiter level. For mixed-order compositions where the user's `count > 1` test fails, `output.order` does not climb above `max(input.order)`, breaking the escalation rule.
-*Fix:* split the conflated quantity into two integers — `order` (the user's logical formula) and `body_level` (always `max(input.order) + 1`). Stored separately in the header.
+**1. Body delimiter level conflated with logical compositional depth (v0.1, fixed in v0.2).**
+*Symptom:* `compose([compound, atom])` produced a file that `decompose` couldn't parse — the outer `~~>>` collided with the inner compound's body delimiters.
+*Root cause:* the original code used a single `order` integer for two distinct meanings (logical depth label *and* physical delimiter level). A count-based formula picked the logical value, and for mixed inputs that formula did not climb above `max(input.order)`, breaking the escalation rule on the delimiter side.
+*Fix:* split into two integers — `body_level` (always `max(input.body_level, default = 0) + 1`, used by the delimiter scheme) and `depth` (the human-friendly compositional-depth label, computed the same way). The count-based formula was retired entirely; both fields now strictly escalate.
 *Lesson:* when one variable carries two distinct meanings, the test cases that look complete probably only exercise the diagonal where the meanings agree. Cover the off-diagonal explicitly.
 
-**2. Compare's dispatch ignored atomicity.**
-*Symptom:* a hand-authored atomic order-0 compared against a `compose([single-input])` composed order-0 would route to `content_diff`, which then tried to read non-existent fields on one side.
-*Root cause:* the dispatch was `if a.is_atomic() { ... } else { ... }`, implicitly assuming both inputs would be atomic-iff-order-zero. That stopped being true once `compose` could produce order-0 outputs.
-*Fix:* dispatch on the 2x2 of `(a.is_atomic(), b.is_atomic())`, with explicit `AtomicityMismatch` error for the diagonal-mismatched cases.
+**2. Compare's dispatch ignored kind (v0.1, fixed in v0.2).**
+*Symptom:* a hand-authored atom compared against a single-input compound would route to `content_diff`, which then tried to read non-existent fields on one side.
+*Root cause:* the dispatch checked the v0.1 `order` field first and only branched on atomicity afterwards, implicitly assuming both inputs would be atom-iff-order-zero. That stopped being true once `compose` could produce single-input compounds.
+*Fix:* dispatch on the 2x2 of `(a.is_atom(), b.is_atom())`, with explicit `KindMismatch` error for the diagonal-mismatched cases. With `order` removed in v0.2, this is the single dispatch axis.
 *Lesson:* when a function's behavior depends on a relationship between two inputs, write the cross-product as a `match`, not a sequence of `if`s. The compiler will tell you when you've forgotten a case.
 
-**3. Hand-authored higher-order claims accepted silently.**
-*Symptom:* a file with `order = 5` and no `composed_of` parsed cleanly. Decompose would refuse to operate on it, but only when called.
-*Root cause:* the validator only required companion fields when `order >= 1`. It didn't *forbid* a high-order claim without a recipe.
-*Fix:* added an `else` arm in the validator: if `composed_of` is absent, `order` must be `0`. New `HandAuthoredHigherOrder` error.
+**3. Hand-authored mis-kinded files accepted silently (v0.1, fixed in v0.2).**
+*Symptom:* under v0.1, a file with `order = 5` and no `composed_of` parsed cleanly; decompose would refuse to operate on it, but only when called. Under v0.2 the equivalent failure mode would be `kind = "atom"` with companion fields populated, or `kind = "compound"` with no recipe.
+*Root cause:* the validator only required companion fields when the discriminator implied them. It didn't *forbid* companion fields when the discriminator said they shouldn't be there.
+*Fix:* added an `else` arm in the v0.2 validator: if `kind = "atom"`, all five companion fields must be absent; if `kind = "compound"`, all must be present with valid contents. The `CompoundMissingField` error covers the missing-when-required half.
 *Lesson:* every "field required when X" check has a dual "field forbidden when not X" that's easy to miss. Spell out both directions.
 
 **4. Create wrote the file before validating, leaving an orphan on bad input.**
@@ -1171,19 +1168,19 @@ Your Google Sheet's four operators map cleanly:
 |---|---|---|---|
 | JOIN | A1:G1 → H1 (delimited concat) | Compose | `render_body` wraps each input chunk in delimiters and joins |
 | SPLIT | B3 → C3:H3 (split on delimiter) | Decompose | walk the body, split at level-N delimiters, parse each chunk as a complete file |
-| UNIQUE | B5:C8 → D5 (deduplicate across array) | Library audit (deferred to v0.2) | hash all `composed_of` IDs across compositions, find rare/common |
+| UNIQUE | B5:C8 → D5 (deduplicate across array) | Library audit (deferred) | hash all `composed_of` IDs across compositions, find rare/common |
 | FORWARD-DIFF | B10, C10 → D10 (set difference) | Compare | hash-by-id over `composed_of`, compute added/removed/version-changed |
 
 The structural difference between the Sheet and Oovra: the Sheet operates on string values (and derives types from formulas); Oovra operates on **typed parsed structures** (and derives string outputs from rendering). The format is doing static-typing work that the Sheet has to do dynamically.
 
-## Appendix D — Things Deliberately Not in v0.1
+## Appendix D — Things Deliberately Out of Scope
 
-- Semver range matching (`^1.0`, `>=1.2`). v0.1 has exact-string match. The `semver` crate is in `Cargo.toml` for when you need it.
-- Dependency resolution — automatic expansion of `requires` references (the field doesn't even exist in v0.1's schema). Add when you have an actual `requires` graph to walk.
-- The `bundle` kind / order. Reserved for future use.
-- Library-wide audits ("which elements are unused", "which appear in 80%+ of compositions"). Easy to add in v0.2; nothing forces it now.
+- Semver range matching (`^1.0`, `>=1.2`). The current build has exact-string match. The `semver` crate is in `Cargo.toml` for when you need it.
+- Dependency resolution — automatic expansion of `requires` references (the field doesn't exist in the schema). Add when you have an actual `requires` graph to walk.
+- The `bundle` kind. Reserved for future use.
+- Library-wide audits ("which elements are unused", "which appear in 80%+ of compositions"). Easy to add later; nothing forces it now.
 - TUI for browsing the library with `ratatui`. Good standalone learning project.
 - HTTP API (`oovra serve`). Easy bolt-on once you actually want one.
 - Obsidian plugin wrapping the operations. Worthwhile when you've used Oovra for two weeks and know which operations belong on a button.
 
-Resist building these in v0.1. The discipline is: **ship, dogfood, then plan v0.2**.
+Resist building these. The discipline is: **ship, dogfood, then plan the next version**.

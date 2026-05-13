@@ -2,7 +2,9 @@
 
 Oovra's errors are an **agent-facing API**. Each variant is structured (with explicit fields), each error message attaches the file path and explains the specific problem in actionable terms. The aim: an LLM reading the error can take a corrective action without further context.
 
-This page lists every variant of `OovraError`, what triggers it, and the canonical error message you'll see.
+This page lists every variant of `OovraError`, what triggers it, and the canonical error message you'll see in v0.2.
+
+> **v0.2 migration note** — five v0.1 variants were renamed or removed in v0.2: `OrderRequiresField` → `MissingField` / `CompoundMissingField`; `HandAuthoredHigherOrder` removed (the case is now caught by `InvalidToml`/`AtomHasForbiddenField`); `OrderMismatch` removed (no `order` to mismatch); `AtomicityMismatch` → `KindMismatch`; `CannotDecomposeAtomic` → `CannotDecomposeAtom`. New variants `AtomHasForbiddenField` and `CompoundMissingField` give kind-aware messages.
 
 ## How errors surface in the CLI
 
@@ -52,8 +54,6 @@ WriteIo { path: PathBuf, source: io::Error }
 
 **Message**: `Failed to read /some/path: <os error>` or `Failed to write /some/path: <os error>`
 
-The `<os error>` portion is whatever `std::io::Error` provided — typically "Permission denied", "No such file or directory", "Disk full", etc.
-
 ---
 
 ### `NotADirectory`
@@ -62,13 +62,7 @@ The `<os error>` portion is whatever `std::io::Error` provided — typically "Pe
 NotADirectory(PathBuf)
 ```
 
-**Trigger**: `Library::load` was given a path that exists but is a file, not a directory.
-
-**Example trigger**:
-
-```bash
-oovra compose --library ./elements/role-statement.md role-statement  # library should be a dir, not a file
-```
+**Trigger**: `Library::load` or `migrate_library` was given a path that exists but is a file, not a directory.
 
 **Message**: `'./elements/role-statement.md' is not a directory`
 
@@ -117,16 +111,6 @@ MissingCloseDelimiter(PathBuf)
 
 **Trigger**: the parser found an opening `+++` but never found a closing `+++` on its own line.
 
-**Example invalid file**:
-
-```
-+++
-name = "Foo"
-order = 0
-
-body never starts because there's no closing +++
-```
-
 **Message**: `Missing closing '+++' delimiter in ./bad.md. Frontmatter must be terminated by '+++' on its own line.`
 
 ---
@@ -139,24 +123,17 @@ body never starts because there's no closing +++
 InvalidToml { path: PathBuf, source: toml::de::Error }
 ```
 
-**Trigger**: the content between the two `+++` lines is not valid TOML.
+**Trigger**: the content between the two `+++` lines is not valid TOML *or* a required structural field (including `kind`) is missing *or* `kind` has an invalid value.
 
-**Example invalid file**:
+**Example v0.2-specific triggers**:
 
-```
-+++
-name = "Foo
-order = 0
-+++
-
-body
-```
-
-(Note the unterminated string in `name`.)
+| Invalid frontmatter                                          | Underlying serde message                                              |
+|-------------------------------------------------------------|-----------------------------------------------------------------------|
+| `name = "Foo"\nid = "foo"\nversion = "1.0.0"\nmeta = ""`    | `missing field 'kind'`                                                |
+| `kind = "atomic"` (invalid value)                            | `unknown variant 'atomic', expected 'atom' or 'compound'`             |
+| `name = "Foo`  (unterminated string)                         | TOML parse error with caret-pointer to the offending column           |
 
 **Message**: `Invalid TOML in frontmatter of ./bad.md: <toml-parse-error-with-line-and-column>`
-
-The `<toml-parse-error>` portion is from the `toml` crate and includes a caret-pointer to the offending column. Very actionable for LLM agents.
 
 ---
 
@@ -166,7 +143,7 @@ The `<toml-parse-error>` portion is from the `toml` crate and includes a caret-p
 TomlSerialize { id: String, source: toml::ser::Error }
 ```
 
-**Trigger**: would only fire if a `PromptElementHeader` struct contained a value the TOML serializer couldn't represent. In practice this should never happen because the struct fields are all serializable types — this is a defensive variant.
+**Trigger**: defensive variant; would only fire if a `PromptElementHeader` struct contained a value the TOML serializer couldn't represent.
 
 **Message**: `Failed to serialize TOML for element 'foo': <toml-ser-error>`
 
@@ -180,7 +157,7 @@ TomlSerialize { id: String, source: toml::ser::Error }
 MissingField { path: PathBuf, field: &'static str }
 ```
 
-**Trigger**: a structurally-required field is missing during deserialization. Usually caught by `InvalidToml` first (because serde's missing-field error fires before this variant is reachable in current code), but kept as a defensive variant.
+**Trigger**: a structurally-required field is missing during deserialization but slipped past TOML parsing. Mostly defensive in v0.2 — the upstream `InvalidToml` usually catches missing fields first.
 
 **Message**: `Missing required field 'name' in ./bad.md`
 
@@ -192,7 +169,7 @@ MissingField { path: PathBuf, field: &'static str }
 InvalidField { path: PathBuf, field: &'static str, value: String, reason: String }
 ```
 
-**Trigger**: a field had the wrong shape — `id` not kebab-case, `version` not semver, `generated_at` not RFC 3339, `name` empty, etc. The most-thrown variant during validation.
+**Trigger**: a field had the wrong shape — `id` not kebab-case, `version` not semver, `generated_at` not RFC 3339, `name` empty, `composed_of` empty array, etc.
 
 **Example invalid files and their messages**:
 
@@ -202,7 +179,9 @@ InvalidField { path: PathBuf, field: &'static str, value: String, reason: String
 | `version = "v1"`                               | `Field 'version' in ./bad.md has invalid value 'v1': must be valid semver (e.g. "1.0.0")`                                                     |
 | `generated_at = "2026-05-10"` (no time)        | `Field 'generated_at' in ./bad.md has invalid value '2026-05-10': must be RFC 3339 (e.g. "2026-05-09T14:23:15Z")`                            |
 | `name = ""`                                    | `Field 'name' in ./bad.md has invalid value '': must be non-empty`                                                                            |
-| atomic file with `generated_at` set            | `Field 'generated_at\|render_mode\|body_level' in ./bad.md has invalid value '<set>': these fields are only valid when composed_of is also present` |
+| `composed_of = []`                             | `Field 'composed_of' in ./bad.md has invalid value '[]': compounds must have at least one input`                                              |
+| `body_level = 0` on a compound                 | `Field 'body_level' in ./bad.md has invalid value '0': must be >= 1 for compounds`                                                            |
+| `depth = 0` on a compound                      | `Field 'depth' in ./bad.md has invalid value '0': must be >= 1 for compounds`                                                                 |
 
 ---
 
@@ -214,42 +193,53 @@ EmptyBody(PathBuf)
 
 **Trigger**: the body (everything after the closing `+++` plus one blank line) is empty or contains only whitespace.
 
-**Example invalid file**:
-
-```
-+++
-name = "Foo"
-order = 0
-id = "foo"
-version = "1.0.0"
-meta = ""
-+++
-
-
-```
-
-(Just whitespace where the body should be.)
-
 **Message**: `Empty body in ./bad.md. The body must be non-empty after stripping whitespace.`
 
 ---
 
-## Validation — joint invariants
+## Validation — kind-specific invariants
 
-### `OrderRequiresField`
+### `AtomHasForbiddenField`
 
 ```rust
-OrderRequiresField { id: String, order: u32, field: &'static str }
+AtomHasForbiddenField { path: PathBuf, id: String, field: &'static str }
 ```
 
-**Trigger**: a file has `composed_of` set but is missing one of the required companion fields (`generated_at`, `render_mode`, or `body_level`). Each missing field triggers a separate error in turn (only the first missing field is reported).
+**Trigger**: a file with `kind = "atom"` carries a compound-only field. The forbidden fields are `composed_of`, `generated_at`, `render_mode`, `body_level`, and `depth`.
 
-**Example invalid file** (order-1 file missing `body_level`):
+**Example invalid file**:
 
-```
+```toml
 +++
-name = "Composed Without Body Level"
-order = 1
+name = "Bad Atom"
+kind = "atom"
+id = "bad"
+version = "1.0.0"
+meta = ""
+body_level = 1
++++
+
+body
+```
+
+**Message**: `Atom 'bad' in ./bad.md has forbidden field 'body_level'. Atoms have no recipe and no composition metadata.`
+
+---
+
+### `CompoundMissingField`
+
+```rust
+CompoundMissingField { path: PathBuf, id: String, field: &'static str }
+```
+
+**Trigger**: a file with `kind = "compound"` is missing one of the required companion fields (`composed_of`, `generated_at`, `render_mode`, `body_level`). The first missing field is reported; fix it and re-validate to see the next.
+
+**Example invalid file** (compound missing `body_level`):
+
+```toml
++++
+name = "Bad Compound"
+kind = "compound"
 id = "broken"
 version = "1.0.0"
 meta = ""
@@ -261,35 +251,7 @@ composed_of = [{ id = "x", version = "1.0.0" }]
 body
 ```
 
-**Message**: `Order-1 element 'broken' is missing the 'body_level' field, which is required for order >= 1`
-
-(The error message name still references "order >= 1" because that's the most common case; the rule is actually "composed_of present implies all four companions present".)
-
----
-
-### `HandAuthoredHigherOrder`
-
-```rust
-HandAuthoredHigherOrder { path: PathBuf, order: u32 }
-```
-
-**Trigger**: a file claims `order >= 1` but lacks a `composed_of` recipe. This is what prevents users from hand-authoring files that claim a compositional depth they don't actually have.
-
-**Example invalid file**:
-
-```
-+++
-name = "Fake Order 2"
-order = 2
-id = "fake"
-version = "1.0.0"
-meta = ""
-+++
-
-body
-```
-
-**Message**: `Hand-authored elements must be order 0; found order 2 in ./bad.md. Use 'oovra compose' to produce higher-order elements.`
+**Message**: `Compound 'broken' in ./bad.md is missing required field 'body_level'.`
 
 ---
 
@@ -303,8 +265,6 @@ DuplicateId { id: String, first: PathBuf, second: PathBuf }
 
 **Trigger**: `Library::load` found two files in the same library directory with the same `id` in their frontmatter.
 
-**Example trigger**: two files `library/role-v1.md` and `library/role-v2.md` both have `id = "role-statement"`.
-
 **Message**: `Duplicate ID 'role-statement' in library: 'library/role-v1.md' and 'library/role-v2.md'`
 
 ---
@@ -316,12 +276,6 @@ ElementNotFound { id: String }
 ```
 
 **Trigger**: a CLI command (compose, compose --text, --re-render) referenced an ID that doesn't exist in the resolved library.
-
-**Example trigger**:
-
-```bash
-oovra compose --library ./elements --text does-not-exist
-```
 
 **Message**: `Element 'does-not-exist' not found in library`
 
@@ -335,12 +289,6 @@ VersionMismatch { id: String, pin: String, actual: String }
 
 **Trigger**: `compose --re-render` enforces version pins from the existing file's `composed_of`. If the library has a different version of any pinned input, this fires.
 
-**Example trigger**: `pairing-agent.md` pins `role-statement = "1.0.0"`, but `library/role-statement.md` has been bumped to `1.1.0`.
-
-```bash
-oovra compose --library ./elements --re-render ./elements/pairing-agent.md
-```
-
 **Message**: `Version mismatch for 'role-statement': pin '1.0.0' does not match library version '1.1.0'`
 
 ---
@@ -353,7 +301,7 @@ oovra compose --library ./elements --re-render ./elements/pairing-agent.md
 EmptyCompose
 ```
 
-**Trigger**: `compose` was called programmatically (via `ComposeRequest`) with an empty `inputs` vector. The CLI prevents this at the argument-parsing level (clap requires at least one positional unless `--re-render` is used), so this variant is mostly for library consumers.
+**Trigger**: `compose` was called programmatically with an empty `inputs` vector. The CLI prevents this at argument-parsing.
 
 **Message**: `Compose requires at least one input`
 
@@ -367,110 +315,85 @@ AlreadyLabeled(PathBuf)
 
 **Trigger**: `create --label <PATH>` was given a path that already starts with `+++` (already has an Oovra header), and `--force` was not passed.
 
-**Example trigger**:
-
-```bash
-# First time: succeeds, prepends header
-oovra create --label ./doc.md --id my-doc --name "My Doc"
-
-# Second time: refused
-oovra create --label ./doc.md --id my-doc-v2 --name "My Doc v2"
-# → Error: File ./doc.md already has an Oovra header. Use --force to overwrite.
-```
-
 **Message**: `File ./doc.md already has an Oovra header. Use --force to overwrite.`
 
 ---
 
-### `CannotDecomposeAtomic`
+### `CannotDecomposeAtom`
 
 ```rust
-CannotDecomposeAtomic { id: String }
+CannotDecomposeAtom { id: String }
 ```
 
-**Trigger**: `decompose` (either mode) was called on a file without a `composed_of` recipe.
+**Trigger**: `decompose` (either mode) was called on an atom (a file with no `composed_of` recipe).
 
 **Example trigger**:
 
 ```bash
-oovra decompose ./elements/role-statement.md  # an atomic file
+oovra decompose ./elements/role-statement.md  # an atom
 ```
 
-**Message**: `Cannot decompose atomic element 'role-statement'. Atomic elements have no recipe (no \`composed_of\` field). Only Compose-produced elements can be decomposed.`
+**Message**: `Cannot decompose atom 'role-statement'. Atoms have no recipe. Only compounds can be decomposed.`
 
 ---
 
 ### `BodyParse`
 
 ```rust
-BodyParse { id: String, order: u32, reason: String }
+BodyParse { id: String, body_level: u32, reason: String }
 ```
 
-**Trigger**: `decompose` tried to split a composed file's body at the level-`body_level` delimiters and encountered a structural problem — unmatched open, unmatched close, or no delimiters at all. Usually indicates the body has been hand-edited (against the rules in [command-compose.md](./command-compose.md#mode-1-file-default--write-a-composed-md)) or is corrupt.
+**Trigger**: `decompose` tried to split a compound's body at the level-`body_level` delimiters and encountered a structural problem — unmatched open, unmatched close, or no delimiters at all. Usually indicates the body has been hand-edited (against the rules in [command-compose.md](./command-compose.md)) or is corrupt.
 
 **Possible `reason` values**:
 
 - `"encountered '~~>>' while still inside an open chunk"` — two opens in a row
 - `"encountered '~~<<' without a matching '~~>>'"` — close without prior open
 - `"missing '~~<<' to close the final chunk"` — last chunk is unterminated
-- `"no '~~>>' delimiters found in body"` — file claims to be composed but body has no chunks
+- `"no '~~>>' delimiters found in body"` — file claims to be a compound but body has no chunks
 
-**Message**: `Body of order-1 element 'foo' could not be split into the expected sub-element chunks: <reason>`
+**Message**: `Body of compound 'foo' at body_level 1 could not be split into the expected sub-element chunks: <reason>`
 
 ---
 
 ## Compare dispatch refusals
 
-### `OrderMismatch`
+### `KindMismatch`
 
 ```rust
-OrderMismatch { a_id: String, a_order: u32, b_id: String, b_order: u32 }
+KindMismatch { a_id: String, a_kind: &'static str, b_id: String, b_kind: &'static str }
 ```
 
-**Trigger**: `compare A B` where `A.order != B.order`.
+**Trigger**: `compare A B` where one is an atom and the other is a compound. v0.1's separate `OrderMismatch` and `AtomicityMismatch` variants collapsed into this single mismatch in v0.2 — kind is the only axis of structural disagreement that compare needs to refuse.
 
-**Example trigger**: comparing an atomic order-0 file with an order-1 composed file.
+**Example trigger**: comparing an atom against a compound.
 
-**Message**: `Cannot compare elements of different orders: 'role-statement' is order 0, 'coding-agent' is order 1. Compare requires same-order inputs.`
-
----
-
-### `AtomicityMismatch`
-
-```rust
-AtomicityMismatch { a_id: String, a_kind: &'static str, b_id: String, b_kind: &'static str }
-```
-
-**Trigger**: `compare A B` where both are at the same order, but one is atomic and the other is composed. This is specifically the `compose([single-input])` edge case — a composed file can be `order = 0` if its sole input was order-0.
-
-**Example trigger**: comparing a hand-authored atomic against a `compose([atomic])` output of the same logical order.
-
-**Message**: `Cannot compare an atomic element with a composed element: 'role-statement' is atomic, 'role-statement-wrapped' is composed. Compare requires both inputs to be the same kind (both atomic or both composed).`
+**Message**: `Cannot compare an atom with a compound: 'role-statement' is an atom, 'coding-agent' is a compound.`
 
 ---
 
 ## Quick lookup: which command produces which error?
 
-| Error | `create` | `compose` | `decompose` | `compare` |
-|---|---|---|---|---|
-| `FileNotFound` | `--label` |  | ✓ | ✓ |
-| `Io` / `WriteIo` | ✓ | ✓ | ✓ |  |
-| `EmptyFile` / `MissingOpenDelimiter` / `MissingCloseDelimiter` |  | ✓ (library load) | ✓ | ✓ |
-| `InvalidToml` |  | ✓ (library load) | ✓ | ✓ |
-| `InvalidField` | ✓ | ✓ (library load) | ✓ | ✓ |
-| `EmptyBody` | ✓ (post-write) | ✓ | ✓ | ✓ |
-| `HandAuthoredHigherOrder` |  | ✓ (library load) | ✓ | ✓ |
-| `OrderRequiresField` |  | ✓ (library load) | ✓ | ✓ |
-| `DuplicateId` |  | ✓ |  |  |
-| `ElementNotFound` |  | ✓ |  |  |
-| `VersionMismatch` |  | `--re-render` |  |  |
-| `EmptyCompose` |  | ✓ (library only) |  |  |
-| `AlreadyLabeled` | `--label` |  |  |  |
-| `CannotDecomposeAtomic` |  |  | ✓ |  |
-| `BodyParse` |  |  | ✓ |  |
-| `OrderMismatch` |  |  |  | ✓ |
-| `AtomicityMismatch` |  |  |  | ✓ |
-| `NotADirectory` |  | ✓ | ✓ |  |
+| Error | `create` | `compose` | `decompose` | `compare` | `migrate` |
+|---|---|---|---|---|---|
+| `FileNotFound` | `--label` |  | ✓ | ✓ | ✓ |
+| `Io` / `WriteIo` | ✓ | ✓ | ✓ |  | ✓ |
+| `NotADirectory` |  | ✓ | ✓ |  | ✓ |
+| `EmptyFile` / `MissingOpenDelimiter` / `MissingCloseDelimiter` |  | ✓ (library load) | ✓ | ✓ | ✓ |
+| `InvalidToml` |  | ✓ (library load) | ✓ | ✓ | ✓ |
+| `InvalidField` | ✓ | ✓ (library load) | ✓ | ✓ | ✓ |
+| `AtomHasForbiddenField` | ✓ (post-write) | ✓ (library load) | ✓ | ✓ | ✓ |
+| `CompoundMissingField` |  | ✓ (library load) | ✓ | ✓ | ✓ |
+| `EmptyBody` | ✓ (post-write) | ✓ | ✓ | ✓ | ✓ |
+| `DuplicateId` |  | ✓ |  |  |  |
+| `ElementNotFound` |  | ✓ |  |  |  |
+| `VersionMismatch` |  | `--re-render` |  |  |  |
+| `EmptyCompose` |  | ✓ (library only) |  |  |  |
+| `AlreadyLabeled` | `--label` |  |  |  |  |
+| `CannotDecomposeAtom` |  |  | ✓ |  |  |
+| `BodyParse` |  |  | ✓ |  | ✓ (when migrating compound bodies) |
+| `KindMismatch` |  |  |  | ✓ |  |
+| `MissingField` |  | ✓ (library load) | ✓ | ✓ | ✓ |
 
 ---
 
@@ -480,7 +403,7 @@ Three principles:
 
 1. **Always attach the file path.** A "TOML parse failed" message with no path is useless; "Missing closing `+++` delimiter in `./elements/foo.md`" is actionable.
 2. **Name the specific field.** Don't say "validation failed"; say "Field 'version' in foo.md has invalid value 'v1': must be valid semver".
-3. **Suggest the fix when obvious.** "Use `--force` to overwrite" / "Use `oovra compose` to produce higher-order elements" / "Compare requires same-order inputs". The error doesn't just say *no* — it tells you what the correct action was.
+3. **Suggest the fix when obvious.** "Use `--force` to overwrite" / "Compounds must have at least one input". The error doesn't just say *no* — it tells you what the correct action was.
 
 These three are particularly important when an LLM agent is the consumer. An agent that can read a clear error message can self-correct in the next turn; an agent that gets "TOML deserialization failed" has nothing to act on.
 
@@ -490,3 +413,4 @@ These three are particularly important when an LLM agent is the consumer. An age
 
 - [schema.md](./schema.md) — the rules these errors enforce
 - [command-create.md](./command-create.md), [command-compose.md](./command-compose.md), [command-decompose.md](./command-decompose.md), [command-compare.md](./command-compare.md) — per-command failure-mode tables
+- [../../CHANGELOG.md](../../CHANGELOG.md) — v0.1 → v0.2 error-variant renames

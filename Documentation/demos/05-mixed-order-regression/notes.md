@@ -70,7 +70,7 @@ But the **parser** needs strict-monotonic delimiters at every level — that's a
 
 ## See also
 
-- [reference/order-and-delimiters.md](../../reference/order-and-delimiters.md) — the two-integer system in full, with worked examples at every order
-- [reference/command-compose.md § Output ordering](../../reference/command-compose.md#output-ordering-how-compute_order-and-body_level-are-determined) — how Compose computes both integers
+- [reference/kind-and-delimiters.md](../../reference/kind-and-delimiters.md) — body_level / depth and the chiral delimiter scheme, with worked examples at every level
+- [reference/command-compose.md](../../reference/command-compose.md) — how Compose computes body_level and depth at composition time
 - [reference/command-decompose.md § How decompose finds the delimiter level](../../reference/command-decompose.md#how-decompose-finds-the-delimiter-level) — why `body_level` (not `order`) drives splitting
 - [reference/errors.md § BodyParse](../../reference/errors.md#bodyparse) — the error that fires when delimiters collide

@@ -1,6 +1,6 @@
 +++
 name = "Examples Discipline"
-order = 0
+kind = "atom"
 id = "examples-discipline"
 version = "1.0.0"
 meta = "Anchor with worked examples"

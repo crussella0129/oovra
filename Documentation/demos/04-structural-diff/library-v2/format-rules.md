@@ -1,6 +1,6 @@
 +++
 name = "Format Rules"
-order = 0
+kind = "atom"
 id = "format-rules"
 version = "1.1.0"
 meta = "Markdown output rules"

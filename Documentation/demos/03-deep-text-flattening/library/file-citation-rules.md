@@ -1,6 +1,6 @@
 +++
 name = "File Citation Rules"
-order = 0
+kind = "atom"
 id = "file-citation-rules"
 version = "1.0.0"
 meta = "Cite as path:line"

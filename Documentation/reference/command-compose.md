@@ -1,13 +1,15 @@
 # `oovra compose` — Reference
 
-Joins ordered prompt elements from a library into a composed output. The JOIN operator. Has three modes selected by flag combinations.
+Joins prompt elements from a library into a **compound** output. The JOIN operator. Has three modes selected by flag combinations.
+
+> **v0.2 migration note.** This page documents the v0.2 schema. The `order` integer is gone; compound outputs are tagged `kind = "compound"` and carry a `depth` field next to the existing `body_level`. If you have v0.1 files on disk, run `oovra migrate <library-dir>` to convert them in place.
 
 ## Synopsis
 
 ```
 oovra compose <ID>...                              [common flags]   # File mode: write a new composed .md
 oovra compose <ID>... --text                       [common flags]   # Text mode: print clean prose to stdout
-oovra compose --re-render <PATH>                   [common flags]   # Re-render an existing composed file's body
+oovra compose --re-render <PATH>                   [common flags]   # Re-render an existing compound file's body
 ```
 
 Common flags across all modes:
@@ -15,45 +17,46 @@ Common flags across all modes:
 | Flag                  | Default          | Purpose                                                  |
 |-----------------------|------------------|----------------------------------------------------------|
 | `--library <DIR>`     | `./elements`     | Directory to resolve input IDs from (recursive walk)     |
-| `--out-id <ID>`       | `composed-<IDs-joined>` | ID for the produced composed file                   |
+| `--out-id <ID>`       | `composed-<IDs-joined>` | ID for the produced compound file                   |
 | `--out-name <NAME>`   | the value of `--out-id` | Human-readable name for the produced file           |
 | `--out-version <V>`   | `"1.0.0"`        | Semver string for the produced file                      |
 | `--out-meta <META>`   | `""`             | Free-form description                                    |
 
 ---
 
-## Mode 1: file (default) — write a composed .md
+## Mode 1: file (default) — write a compound .md
 
 ```
 oovra compose <ID-1> <ID-2> ... <ID-N>  --output <PATH>  [common flags]
 ```
 
-Resolves each `<ID>` against the library, computes the output's `order` and `body_level`, renders the body (embedding each input's full source file wrapped in chiral delimiters), and writes a complete Oovra file to `--output <PATH>`.
+Resolves each `<ID>` against the library, computes the output's `body_level` and `depth`, renders the body (embedding each input's full source file wrapped in chiral delimiters), and writes a complete Oovra file to `--output <PATH>`.
 
 ### Flags specific to this mode
 
 | Flag                   | Required?      | Default              | Purpose                                                                                                                    |
 |------------------------|----------------|----------------------|----------------------------------------------------------------------------------------------------------------------------|
-| `<ID>...` positional   | yes (≥1)       | —                    | Input element IDs in the order they should appear in the composition. The order is preserved in `composed_of` and the body. |
-| `-o, --output <PATH>`  | no             | `<library>/<out-id>.md` | Where to write the composed file. Defaults to your library directory + the out-id + `.md`.                              |
+| `<ID>...` positional   | yes (≥1)       | —                    | Input element IDs in the sequence they should appear in the composition. The sequence is preserved in `composed_of` and the body. |
+| `-o, --output <PATH>`  | no             | `<library>/<out-id>.md` | Where to write the compound file. Defaults to your library directory + the out-id + `.md`.                              |
 
 ### What's produced
 
 A complete Oovra file at the output path. Its frontmatter has:
 
 - `name` ← `--out-name` (or `--out-id` if not given)
-- `order` ← computed by `compute_order(input_orders)` ([formula here](./order-and-delimiters.md#computing-order))
+- `kind` ← `"compound"` (always — Mode 1 only produces compounds)
 - `id` ← `--out-id` (or auto-generated)
 - `version` ← `--out-version` (default `"1.0.0"`)
 - `meta` ← `--out-meta` (default `""`)
 - `generated_at` ← current UTC time as RFC 3339 (set by the tool, never user-provided)
-- `render_mode` ← `"markdown-h2"` (v0.1 has one renderer)
-- `body_level` ← computed by `compute_body_level(input_orders) = max(input.order) + 1`
+- `render_mode` ← `"markdown-h2"` (v0.2 has one renderer)
+- `body_level` ← computed by `compute_body_level(input_body_levels) = max(input.body_level, default = 0) + 1`
+- `depth` ← computed by `compute_depth(input_depths) = max(input.depth, default = 0) + 1` (numerically equal to `body_level` for every valid compound; see [kind-and-delimiters.md](./kind-and-delimiters.md))
 - `composed_of` ← array of `{id, version}` for each input, in argument order, with versions from the library
 
-The body is the concatenation of each input's full file content (frontmatter + body), each wrapped between `~~...~~>>` and `~~...~~<<` lines whose tilde count is `body_level + 1`. See [order-and-delimiters.md](./order-and-delimiters.md#the-delimiter-scheme) for the full spec.
+The body is the concatenation of each input's full file content (frontmatter + body), each wrapped between `~~...~~>>` and `~~...~~<<` lines whose tilde count is `body_level + 1`. See [kind-and-delimiters.md](./kind-and-delimiters.md#the-delimiter-scheme) for the full spec.
 
-### Example: 3 atomics → an order-1 prompt
+### Example: 3 atoms → a body_level-1 compound
 
 ```bash
 oovra compose --library ./elements \
@@ -67,13 +70,14 @@ Output (header excerpt):
 ```toml
 +++
 name = "Coding Agent"
-order = 1
+kind = "compound"
 id = "coding-agent"
 version = "1.0.0"
 meta = "Strict 3-element pair"
 generated_at = "2026-05-10T18:56:15.993212217+00:00"
 render_mode = "markdown-h2"
 body_level = 1
+depth = 1
 
 [[composed_of]]
 id = "role-statement"
@@ -93,13 +97,13 @@ Followed by a body containing three `~~>> ... ~~<<` chunks — one per input, ea
 
 ### Ordering matters
 
-Inputs are emitted in the body in the **exact order** of the positional arguments. The `composed_of` array preserves this order. This affects:
+Inputs are emitted in the body in the **exact sequence** of the positional arguments. The `composed_of` array preserves this sequence. This affects:
 
-- The order H2 sections appear in `compose --text` output
-- The order leaves appear in `decompose --full` output (when listed)
+- The sequence H2 sections appear in `compose --text` output
+- The sequence leaves appear in `decompose --full` output (when listed)
 - `compare`'s structural diff (see notes there about set vs sequence semantics)
 
-If you want a different rendering order, re-run Compose with a different argument order.
+If you want a different rendering sequence, re-run Compose with a different argument order.
 
 ### Failure modes
 
@@ -123,7 +127,7 @@ Resolves the inputs, recursively flattens through every level of composition, an
 
 ### What you get
 
-For each atomic input in the tree, one section:
+For each atom in the tree, one section:
 
 ```markdown
 ## <id-of-leaf-1>
@@ -137,13 +141,13 @@ For each atomic input in the tree, one section:
 ...
 ```
 
-Composed inputs are **recursed through**: their own ID never appears in the output, only the IDs of the atomic leaves they ultimately contain. An order-3 input flattens to whatever atomic leaves are inside it, in composition order.
+Compound inputs are **recursed through**: their own ID never appears in the output, only the IDs of the atom leaves they ultimately contain. A `depth = 3` input flattens to whatever atom leaves are inside it, in composition order.
 
 This mode is the intended way to get a paste-ready system prompt out of Oovra. It is **lossy** — version numbers, metadata, generation timestamps don't appear — but that's intentional. A model doesn't need that information; you do, and you can recover it from the on-disk form.
 
 ### Example
 
-Library has `role-statement` (atomic), `safety-fence` (atomic), `tone-direct` (atomic).
+Library has `role-statement` (atom), `safety-fence` (atom), `tone-direct` (atom).
 
 ```bash
 oovra compose --library ./elements --text role-statement safety-fence tone-direct
@@ -165,15 +169,15 @@ When asked to produce code that would damage a system, decline once briefly and 
 Be direct. Skip preamble. Skip apology. State conclusions before reasoning.
 ```
 
-### `--text` with composed inputs
+### `--text` with compound inputs
 
-If one of the input IDs is itself a composed element, the recursion descends into it. For example, if `coding-agent` is an order-1 element composed of three atomics, then:
+If one of the input IDs is itself a compound element, the recursion descends into it. For example, if `coding-agent` is a compound (body_level 1) composed of three atoms, then:
 
 ```bash
 oovra compose --library ./elements --text coding-agent
 ```
 
-produces the same three H2 sections as if you had typed the three atomic IDs directly. The order-1 wrapper is invisible in the prose form. See [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) for an order-2 example.
+produces the same three H2 sections as if you had typed the three atom IDs directly. The compound wrapper is invisible in the prose form. See [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) for a body_level-2 example.
 
 ### Failure modes
 
@@ -181,19 +185,19 @@ produces the same three H2 sections as if you had typed the three atomic IDs dir
 |----------------------------------|------------------------------------------------------|
 | Zero positional IDs              | clap error (positional required)                     |
 | `<ID>` not in library            | `anyhow!("element '{id}' not found in library")`     |
-| Sub-element decompose fails      | [`BodyParse`](./errors.md#bodyparse) (rare; would indicate a corrupted composed file in the library) |
+| Sub-element decompose fails      | [`BodyParse`](./errors.md#bodyparse) (rare; would indicate a corrupted compound file in the library) |
 
 `--text` cannot conflict with `--output` (clap-level conflict). Producing a file *and* printing prose are different operations — choose one.
 
 ---
 
-## Mode 3: `--re-render <PATH>` — regenerate an existing composed file's body
+## Mode 3: `--re-render <PATH>` — regenerate an existing compound file's body
 
 ```
 oovra compose --re-render <PATH>  [common flags except positional IDs]
 ```
 
-Reads the existing composed file at `<PATH>`, extracts its `composed_of` recipe, re-resolves every entry against the current library state with **strict version-pin enforcement**, and overwrites the file's body with a freshly rendered version.
+Reads the existing compound file at `<PATH>`, extracts its `composed_of` recipe, re-resolves every entry against the current library state with **strict version-pin enforcement**, and overwrites the file's body with a freshly rendered version.
 
 ### Use case
 
@@ -201,7 +205,7 @@ You've changed something about a renderer or moved code around and want the body
 
 - Refreshing `generated_at` to track when the file was last rebuilt
 - Catching cases where the body has been hand-edited (the re-render will diverge from the hand-edit, surfacing the drift)
-- Future-proofing for when v0.2 ships a new renderer — re-render the whole library against the new renderer
+- Future-proofing for when a future renderer ships — re-render the whole library against the new renderer
 
 ### Strict pin enforcement
 
@@ -217,7 +221,7 @@ If the library still has those versions:
 
 ```bash
 oovra compose --library ./elements --re-render ./elements/coding-agent.md
-# → Re-rendered ./elements/coding-agent.md (order 1)
+# → Re-rendered ./elements/coding-agent.md (body_level 1)
 ```
 
 If `role-statement` has been bumped to `1.1.0` in the library:
@@ -240,48 +244,48 @@ oovra compose --library ./elements --out-id coding-agent --out-version 1.1.0 \
 | Trigger                                                       | Error                                                                                          |
 |---------------------------------------------------------------|------------------------------------------------------------------------------------------------|
 | `<PATH>` does not exist                                       | [`FileNotFound`](./errors.md#filenotfound)                                                     |
-| `<PATH>` is atomic (no `composed_of`)                         | `anyhow!("--re-render target is order 0 and has no composed_of")`                              |
+| `<PATH>` is an atom (no `composed_of`)                        | `anyhow!("--re-render target is an atom and has no composed_of")`                              |
 | Library is missing an input named in `composed_of`            | [`ElementNotFound`](./errors.md#elementnotfound)                                               |
 | Library version of an input differs from its pin              | [`VersionMismatch`](./errors.md#versionmismatch)                                               |
 
 ---
 
-## Output ordering: how `compute_order` and `body_level` are determined
+## Output sizing: how `body_level` and `depth` are determined
 
-When Compose produces a file, it computes two numbers from the input orders:
-
-**`order`** (the user-facing logical depth):
-
-```text
-let H = max(input.order for input in inputs)
-let C = count of inputs whose order == H
-output.order = if C > 1 then H + 1 else H
-```
+When Compose produces a file, it computes two numbers from the inputs. Both use the same strict-escalation rule — the v0.1 count-based `compute_order` formula is gone.
 
 **`body_level`** (the physical on-disk delimiter level):
 
 ```text
-output.body_level = max(input.order for input in inputs) + 1
+output.body_level = max(input.body_level, default = 0) + 1
 ```
 
-The two coincide for homogeneous compositions but **diverge** for mixed-order cases — see [order-and-delimiters.md](./order-and-delimiters.md) and [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/).
+Atoms contribute `body_level = 0` (they have no `body_level` field on disk; the formula treats absence as 0).
+
+**`depth`** (the human-friendly compositional-depth label, mirrors `body_level`):
+
+```text
+output.depth = max(input.depth, default = 0) + 1
+```
+
+The two are numerically equal for every valid compound; `depth` is exposed as a separate field so downstream tooling can read "how deep is this recipe tree" without knowing the delimiter-level convention. See [kind-and-delimiters.md](./kind-and-delimiters.md).
 
 ### Worked examples
 
-| Inputs           | `order` | `body_level` | Why                                                                  |
-|------------------|---------|--------------|----------------------------------------------------------------------|
-| 3 × order 0      | 1       | 1            | All atomic peers; promote to order 1                                  |
-| 2 × order 1      | 2       | 2            | Two peers at order 1; promote to order 2                              |
-| 1 × order 1 + 2 × order 0 | 1 | 2            | Only one input at the max (1); no logical climb, but body must escalate |
-| 1 × order 2 + 1 × order 1 + 4 × order 0 | 2 | 3 | Single order-2 input; logical stays at 2, body escalates to 3        |
+| Inputs                                              | `body_level` | `depth` |
+|-----------------------------------------------------|--------------|---------|
+| 3 × atom                                            | 1            | 1       |
+| 2 × compound at body_level 1                        | 2            | 2       |
+| 1 × compound at body_level 1 + 2 × atom             | 2            | 2       |
+| 1 × compound at body_level 2 + 1 × compound at body_level 1 + 4 × atom | 3            | 3       |
 
 ---
 
 ## See also
 
 - [schema.md](./schema.md) — the file format Compose produces
-- [order-and-delimiters.md](./order-and-delimiters.md) — the formulas and the delimiter spec
+- [kind-and-delimiters.md](./kind-and-delimiters.md) — the formulas and the delimiter spec
 - [command-decompose.md](./command-decompose.md) — the inverse operation; reads what Compose produces
 - [errors.md](./errors.md) — every error Compose can surface
-- [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) — `--text` on an order-2 element
-- [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) — the mixed-order case where `order` and `body_level` diverge
+- [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) — `--text` on a body_level-2 compound
+- [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) — the mixed-input case the strict-escalation rule was designed for

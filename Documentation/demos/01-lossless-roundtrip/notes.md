@@ -69,4 +69,4 @@ See `results.md` — all 4 leaves byte-identical to the originals.
 - [reference/command-decompose.md](../../reference/command-decompose.md) — full `decompose` reference, including `--full` semantics
 - [reference/command-compose.md](../../reference/command-compose.md) — how the composed file is produced
 - [reference/schema.md](../../reference/schema.md) — the file format being round-tripped
-- [reference/order-and-delimiters.md](../../reference/order-and-delimiters.md) — the chiral delimiter scheme that makes byte-identity possible
+- [reference/kind-and-delimiters.md](../../reference/kind-and-delimiters.md) — the chiral delimiter scheme that makes byte-identity possible

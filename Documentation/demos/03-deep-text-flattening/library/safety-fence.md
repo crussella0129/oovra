@@ -1,6 +1,6 @@
 +++
 name = "Safety Fence"
-order = 0
+kind = "atom"
 id = "safety-fence"
 version = "1.0.0"
 meta = "Refusal posture"

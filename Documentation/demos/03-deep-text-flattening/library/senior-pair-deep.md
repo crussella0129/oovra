@@ -1,12 +1,13 @@
 +++
 name = "Senior Pair (Deep)"
-order = 2
+kind = "compound"
 id = "senior-pair-deep"
 version = "1.0.0"
 meta = "Order-2 composition of two order-1 sub-prompts"
 generated_at = "2026-05-10T19:22:54.257282900+00:00"
 render_mode = "markdown-h2"
 body_level = 2
+depth = 2
 
 [[composed_of]]
 id = "agent-foundations"
@@ -20,13 +21,14 @@ version = "1.0.0"
 ~~~>>
 +++
 name = "Agent Foundations"
-order = 1
+kind = "compound"
 id = "agent-foundations"
 version = "1.0.0"
 meta = "Role + safety + tone"
 generated_at = "2026-05-10T19:22:54.202449600+00:00"
 render_mode = "markdown-h2"
 body_level = 1
+depth = 1
 
 [[composed_of]]
 id = "role-statement"
@@ -44,7 +46,7 @@ version = "1.0.0"
 ~~>>
 +++
 name = "Role Statement"
-order = 0
+kind = "atom"
 id = "role-statement"
 version = "1.0.0"
 meta = "Who the assistant is"
@@ -55,7 +57,7 @@ You are a senior software engineer pairing with a developer at the keyboard. Sta
 ~~>>
 +++
 name = "Safety Fence"
-order = 0
+kind = "atom"
 id = "safety-fence"
 version = "1.0.0"
 meta = "Refusal posture"
@@ -66,7 +68,7 @@ When asked to produce code that would damage a system, leak credentials, or bypa
 ~~>>
 +++
 name = "Tone Discipline"
-order = 0
+kind = "atom"
 id = "tone-discipline"
 version = "1.0.0"
 meta = "Direct, no preamble"
@@ -78,13 +80,14 @@ Be direct. Skip preamble and apology. State the conclusion before the reasoning 
 ~~~>>
 +++
 name = "Output Discipline"
-order = 1
+kind = "compound"
 id = "output-discipline"
 version = "1.0.0"
 meta = "Format + examples + citations"
 generated_at = "2026-05-10T19:22:54.230304100+00:00"
 render_mode = "markdown-h2"
 body_level = 1
+depth = 1
 
 [[composed_of]]
 id = "format-rules"
@@ -102,7 +105,7 @@ version = "1.0.0"
 ~~>>
 +++
 name = "Format Rules"
-order = 0
+kind = "atom"
 id = "format-rules"
 version = "1.0.0"
 meta = "Markdown output rules"
@@ -113,7 +116,7 @@ Format prose as Markdown. Fence code with triple-backticks and a language tag. U
 ~~>>
 +++
 name = "Examples Discipline"
-order = 0
+kind = "atom"
 id = "examples-discipline"
 version = "1.0.0"
 meta = "Anchor with worked examples"
@@ -124,7 +127,7 @@ For every guidance section longer than three sentences, anchor it with one concr
 ~~>>
 +++
 name = "File Citation Rules"
-order = 0
+kind = "atom"
 id = "file-citation-rules"
 version = "1.0.0"
 meta = "Cite as path:line"
