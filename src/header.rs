@@ -109,15 +109,14 @@ pub struct PromptElementHeader {
 }
 
 impl PromptElementHeader {
-    /// True if this element has no recipe (i.e. was hand-authored and has no
-    /// embedded sub-elements).
-    pub fn is_atomic(&self) -> bool {
-        self.composed_of.is_none()
+    /// True if this element is an atom (hand-authored, no recipe).
+    pub fn is_atom(&self) -> bool {
+        matches!(self.kind, PromptElementKind::Atom)
     }
 
-    /// True if this element has a recipe (i.e. was produced by Compose).
-    pub fn is_composed(&self) -> bool {
-        self.composed_of.is_some()
+    /// True if this element is a compound (produced by Compose, has a recipe).
+    pub fn is_compound(&self) -> bool {
+        matches!(self.kind, PromptElementKind::Compound)
     }
 }
 

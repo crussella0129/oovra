@@ -1,5 +1,6 @@
-//! End-to-end pipeline tests: parse, compose order-1 from order-0s, compose
-//! order-2 from order-1s, decompose one level, decompose --full, compare.
+//! End-to-end pipeline tests: parse, compose compounds from atoms, compose
+//! deeper compounds from compounds, decompose one level, decompose --full,
+//! compare.
 
 use std::path::Path;
 
@@ -102,7 +103,7 @@ fn library_loads_five_atoms() {
 }
 
 #[test]
-fn compose_three_order_zero_into_one_order_one() {
+fn compose_three_atoms_into_one_compound() {
     let library = Library::load(elements_dir()).unwrap();
     let req = ComposeRequest {
         library: &library,
@@ -137,10 +138,10 @@ fn compose_three_order_zero_into_one_order_one() {
 }
 
 #[test]
-fn compose_two_order_one_into_one_order_two() {
+fn compose_two_compounds_into_one_deeper_compound() {
     let library = Library::load(elements_dir()).unwrap();
 
-    // Build two distinct order-1 elements.
+    // Build two distinct compounds-of-atoms.
     let sub_a = compose(ComposeRequest {
         library: &library,
         inputs: vec![
@@ -168,19 +169,19 @@ fn compose_two_order_one_into_one_order_two() {
 
     // Stage them into a temp directory so we can re-compose from the library
     // side. (Compose resolves inputs via Library, so they must be on disk.)
-    let tmp = tempdir_for_test("order-2-staging");
+    let tmp = tempdir_for_test("deep-compound-staging");
     write(&sub_a, &tmp.join("subprompt-a.md")).unwrap();
     write(&sub_b, &tmp.join("subprompt-b.md")).unwrap();
 
-    // Copy the order-0 elements into the same staging dir so they are
-    // resolvable too (for the body's nested decomposition later).
+    // Copy the atoms into the same staging dir so they are resolvable too
+    // (for the body's nested decomposition later).
     for entry in std::fs::read_dir(elements_dir()).unwrap() {
         let p = entry.unwrap().path();
         std::fs::copy(&p, tmp.join(p.file_name().unwrap())).unwrap();
     }
 
     let staged_lib = Library::load(&tmp).unwrap();
-    let order_two = compose(ComposeRequest {
+    let deep = compose(ComposeRequest {
         library: &staged_lib,
         inputs: vec![
             ("subprompt-a".into(), None),
@@ -193,13 +194,13 @@ fn compose_two_order_one_into_one_order_two() {
     })
     .unwrap();
 
-    assert_eq!(order_two.header.kind, oovra::header::PromptElementKind::Compound);
-    assert_eq!(order_two.header.body_level, Some(2));
-    assert!(order_two.body.contains("~~~>>"));
-    assert!(order_two.body.contains("~~~<<"));
+    assert_eq!(deep.header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(deep.header.body_level, Some(2));
+    assert!(deep.body.contains("~~~>>"));
+    assert!(deep.body.contains("~~~<<"));
     // Inner level-1 delimiters must be preserved verbatim.
-    assert!(order_two.body.contains("~~>>"));
-    assert!(order_two.body.contains("~~<<"));
+    assert!(deep.body.contains("~~>>"));
+    assert!(deep.body.contains("~~<<"));
 }
 
 #[test]
@@ -232,11 +233,11 @@ fn decompose_one_level_recovers_immediate_inputs() {
 }
 
 #[test]
-fn decompose_full_writes_folder_tree_for_order_two() {
+fn decompose_full_writes_folder_tree_for_deep_compound() {
     let tmp = tempdir_for_test("decompose-full");
     let library = Library::load(elements_dir()).unwrap();
 
-    // Build two order-1 sub-prompts.
+    // Build two sub-compounds.
     let sub_a = compose(ComposeRequest {
         library: &library,
         inputs: vec![
@@ -262,7 +263,7 @@ fn decompose_full_writes_folder_tree_for_order_two() {
     })
     .unwrap();
 
-    // Stage to a temp library that contains the order-0s and the two order-1s
+    // Stage to a temp library that contains the atoms and the two sub-compounds.
     let staging = tmp.join("staging");
     std::fs::create_dir_all(&staging).unwrap();
     for entry in std::fs::read_dir(elements_dir()).unwrap() {
@@ -273,7 +274,7 @@ fn decompose_full_writes_folder_tree_for_order_two() {
     write(&sub_b, &staging.join("subprompt-b.md")).unwrap();
 
     let staged_lib = Library::load(&staging).unwrap();
-    let order_two = compose(ComposeRequest {
+    let deep = compose(ComposeRequest {
         library: &staged_lib,
         inputs: vec![
             ("subprompt-a".into(), None),
@@ -287,7 +288,7 @@ fn decompose_full_writes_folder_tree_for_order_two() {
     .unwrap();
 
     let out_dir = tmp.join("out");
-    let element_root = decompose_full(&order_two, &out_dir).unwrap();
+    let element_root = decompose_full(&deep, &out_dir).unwrap();
     assert!(element_root.is_dir(), "{} should be a directory", element_root.display());
 
     // Expected structure:
@@ -503,7 +504,7 @@ fn compare_refuses_atom_vs_compound() {
     .unwrap();
     let atom = library.get("role-declaration").unwrap();
     let err = compare(atom, &compound).unwrap_err();
-    assert!(matches!(err, oovra::OovraError::AtomicityMismatch { .. }));
+    assert!(matches!(err, oovra::OovraError::KindMismatch { .. }));
 }
 
 /// Lightweight tempdir helper. Creates a unique directory under

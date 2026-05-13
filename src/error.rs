@@ -61,6 +61,20 @@ pub enum OovraError {
         reason: String,
     },
 
+    #[error("Atom '{id}' in {path} has forbidden field '{field}'. Atoms have no recipe and no composition metadata.")]
+    AtomHasForbiddenField {
+        path: PathBuf,
+        id: String,
+        field: &'static str,
+    },
+
+    #[error("Compound '{id}' in {path} is missing required field '{field}'.")]
+    CompoundMissingField {
+        path: PathBuf,
+        id: String,
+        field: &'static str,
+    },
+
     #[error("Empty body in {0}. The body must be non-empty after stripping whitespace.")]
     EmptyBody(PathBuf),
 
@@ -86,11 +100,10 @@ pub enum OovraError {
     },
 
     // Removed in v0.2: OrderMismatch. Order is gone; kind-mismatch is the
-    // remaining axis of disagreement, reported via AtomicityMismatch below
-    // (renamed to KindMismatch in commit 5/6).
+    // remaining axis of disagreement, reported via KindMismatch below.
 
-    #[error("Cannot compare an atom with a compound: '{a_id}' is {a_kind}, '{b_id}' is {b_kind}. Compare requires both inputs to be the same kind.")]
-    AtomicityMismatch {
+    #[error("Cannot compare an atom with a compound: '{a_id}' is an {a_kind}, '{b_id}' is a {b_kind}.")]
+    KindMismatch {
         a_id: String,
         a_kind: &'static str,
         b_id: String,
@@ -103,8 +116,8 @@ pub enum OovraError {
     #[error("File {0} already has an Oovra header. Use --force to overwrite.")]
     AlreadyLabeled(PathBuf),
 
-    #[error("Cannot decompose atomic element '{id}'. Atomic elements have no recipe (no `composed_of` field). Only Compose-produced elements can be decomposed.")]
-    CannotDecomposeAtomic { id: String },
+    #[error("Cannot decompose atom '{id}'. Atoms have no recipe. Only compounds can be decomposed.")]
+    CannotDecomposeAtom { id: String },
 
     #[error("Body of compound '{id}' at body_level {body_level} could not be split into the expected sub-element chunks: {reason}")]
     BodyParse {

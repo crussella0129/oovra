@@ -33,8 +33,8 @@ use crate::error::{OovraError, Result};
 /// element's header). Each chunk between matched delimiters is parsed as a
 /// full Oovra file.
 pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
-    if element.header.is_atomic() {
-        return Err(OovraError::CannotDecomposeAtomic {
+    if element.header.is_atom() {
+        return Err(OovraError::CannotDecomposeAtom {
             id: element.header.id.clone(),
         });
     }
@@ -136,14 +136,14 @@ fn write_recursive(element: &PromptElement, dir: &Path) -> Result<()> {
         source,
     })?;
 
-    if element.header.is_atomic() {
+    if element.header.is_atom() {
         return Ok(());
     }
 
     // For each immediate input, decompose one level and recurse.
     let immediate_inputs = decompose(element)?;
     for input in immediate_inputs {
-        if input.header.is_atomic() {
+        if input.header.is_atom() {
             // Order-0 leaf: write it directly into the current directory.
             let path = dir.join(format!("{}.md", input.header.id));
             let content = serialize(&input)?;
@@ -169,8 +169,8 @@ fn write_recursive(element: &PromptElement, dir: &Path) -> Result<()> {
 /// composed element (id, version, order). For the `decompose` command's
 /// no-write inspection mode.
 pub fn report(element: &PromptElement) -> Result<DecomposeReport> {
-    if element.header.is_atomic() {
-        return Err(OovraError::CannotDecomposeAtomic {
+    if element.header.is_atom() {
+        return Err(OovraError::CannotDecomposeAtom {
             id: element.header.id.clone(),
         });
     }

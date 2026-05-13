@@ -171,7 +171,7 @@ pub fn render_text(inputs: &[&PromptElement]) -> Result<String> {
 /// For order >= 1 elements, the body is parsed for embedded sub-elements and
 /// the recursion descends.
 fn render_for_paste(element: &PromptElement) -> Result<String> {
-    if element.header.is_atomic() {
+    if element.header.is_atom() {
         return Ok(format!("## {}\n\n{}", element.header.id, element.body.trim()));
     }
     // Composed element: split its body into immediate sub-elements and

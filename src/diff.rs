@@ -68,7 +68,7 @@ pub fn compare(a: &PromptElement, b: &PromptElement) -> Result<DiffReport> {
         (PromptElementKind::Compound, PromptElementKind::Compound) => {
             Ok(DiffReport::Structural(structural_diff(a, b)?))
         }
-        (a_kind, b_kind) => Err(OovraError::AtomicityMismatch {
+        (a_kind, b_kind) => Err(OovraError::KindMismatch {
             a_id: a.header.id.clone(),
             a_kind: kind_label(a_kind),
             b_id: b.header.id.clone(),

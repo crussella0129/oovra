@@ -202,11 +202,10 @@ fn validate_atom(header: &PromptElementHeader, path: &Path) -> Result<()> {
     ];
     for (field, present) in forbidden {
         if *present {
-            return Err(OovraError::InvalidField {
+            return Err(OovraError::AtomHasForbiddenField {
                 path: path.to_path_buf(),
+                id: header.id.clone(),
                 field,
-                value: "<set>".to_string(),
-                reason: "this field is only valid on compounds; atoms have no recipe".to_string(),
             });
         }
     }
@@ -216,8 +215,9 @@ fn validate_atom(header: &PromptElementHeader, path: &Path) -> Result<()> {
 fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
     // Compounds require composed_of plus all composition metadata.
     let composed_of = header.composed_of.as_ref().ok_or_else(|| {
-        OovraError::MissingField {
+        OovraError::CompoundMissingField {
             path: path.to_path_buf(),
+            id: header.id.clone(),
             field: "composed_of",
         }
     })?;
@@ -249,8 +249,9 @@ fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
     }
 
     let generated_at = header.generated_at.as_deref().ok_or_else(|| {
-        OovraError::MissingField {
+        OovraError::CompoundMissingField {
             path: path.to_path_buf(),
+            id: header.id.clone(),
             field: "generated_at",
         }
     })?;
@@ -264,16 +265,18 @@ fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
     }
 
     if header.render_mode.is_none() {
-        return Err(OovraError::MissingField {
+        return Err(OovraError::CompoundMissingField {
             path: path.to_path_buf(),
+            id: header.id.clone(),
             field: "render_mode",
         });
     }
 
     match header.body_level {
         None => {
-            return Err(OovraError::MissingField {
+            return Err(OovraError::CompoundMissingField {
                 path: path.to_path_buf(),
+                id: header.id.clone(),
                 field: "body_level",
             });
         }
@@ -420,7 +423,7 @@ mod tests {
         // A file claiming kind = "compound" but with no recipe is rejected.
         let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::MissingField { field: "composed_of", .. }));
+        assert!(matches!(err, OovraError::CompoundMissingField { field: "composed_of", .. }));
     }
 
     #[test]
@@ -439,14 +442,14 @@ mod tests {
         // Atom file with compound-only fields set should be rejected.
         let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\nbody_level = 1\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::InvalidField { field: "body_level", .. }));
+        assert!(matches!(err, OovraError::AtomHasForbiddenField { field: "body_level", .. }));
     }
 
     #[test]
     fn parse_rejects_compound_without_body_level() {
         let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::MissingField { field: "body_level", .. }));
+        assert!(matches!(err, OovraError::CompoundMissingField { field: "body_level", .. }));
     }
 
     #[test]
@@ -481,7 +484,7 @@ mod tests {
             );
             let err = parse(&content, Path::new("x.md")).unwrap_err();
             assert!(
-                matches!(err, OovraError::InvalidField { field: f, .. } if f == field),
+                matches!(err, OovraError::AtomHasForbiddenField { field: f, .. } if f == field),
                 "atom with {field} should be rejected"
             );
         }
@@ -493,6 +496,6 @@ mod tests {
         // generated_at, render_mode, and body_level are all required.
         let bare = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let err = parse(bare, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::MissingField { .. }));
+        assert!(matches!(err, OovraError::CompoundMissingField { .. }));
     }
 }
