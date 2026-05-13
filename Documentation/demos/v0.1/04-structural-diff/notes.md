@@ -65,6 +65,6 @@ In v0.1, the structural diff was order-blind: composing `[role, safety, tone]` t
 
 ## See also
 
-- [reference/command-compare.md](../../reference/command-compare.md) — full reference for the kind-aware dispatch and the four-axis structural diff
-- [reference/schema.md § composed_of](../../reference/schema.md#the-four-conditional-fields-composed-elements-only) — the recipe field structural diff operates on
-- [reference/command-compose.md § --re-render](../../reference/command-compose.md#mode-3---re-render-path--regenerate-an-existing-composed-files-body) — re-rendering uses the same recipe but with strict pin enforcement
+- [reference/command-compare.md](../../../reference/command-compare.md) — full reference for the kind-aware dispatch and the four-axis structural diff
+- [reference/schema.md § composed_of](../../../reference/schema.md#the-four-conditional-fields-composed-elements-only) — the recipe field structural diff operates on
+- [reference/command-compose.md § --re-render](../../../reference/command-compose.md#mode-3---re-render-path--regenerate-an-existing-composed-files-body) — re-rendering uses the same recipe but with strict pin enforcement

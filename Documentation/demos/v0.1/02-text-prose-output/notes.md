@@ -50,6 +50,6 @@ The prose form is produced by `render_text()` in `src/render.rs`, which calls `r
 
 ## See also
 
-- [reference/command-compose.md § Mode 2: --text](../../reference/command-compose.md#mode-2---text--print-clean-prose-to-stdout) — full reference for the prose-output mode
-- [reference/schema.md](../../reference/schema.md) — what fields are present in the on-disk form vs stripped from the prose form
+- [reference/command-compose.md § Mode 2: --text](../../../reference/command-compose.md#mode-2---text--print-clean-prose-to-stdout) — full reference for the prose-output mode
+- [reference/schema.md](../../../reference/schema.md) — what fields are present in the on-disk form vs stripped from the prose form
 - [demos/03-deep-text-flattening](../03-deep-text-flattening/) — the same mechanism applied to a 2-level-deep composition

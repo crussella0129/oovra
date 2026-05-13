@@ -1,48 +1,58 @@
 # Demos
 
-Five end-to-end demonstrations of distinct architectural properties of Oovra. Each subfolder is self-contained — open the `notes.md` for an explanation of what's being demonstrated and the `results.md` for the captured verdict.
+End-to-end demonstrations of distinct architectural properties of Oovra, organized by the version they were originally captured under.
 
-Demos are use-case-driven: each one asks a question like "does the lossless decomposition claim actually hold byte-for-byte?" and answers it with concrete files and captured outputs. They complement the per-feature [reference docs](../reference/) — the reference tells you *how* each command works; the demos show you *that* the architecture works.
+```
+demos/
+├── README.md            ← this file (the demos index)
+├── v0.1/                ← five demos captured against Oovra v0.1.0; library files migrated in place to v0.2
+└── v0.2/                ← v0.2-era demos that exercise the new schema and operators
+```
 
-## The five demos
+Each subfolder is self-contained — open its `README.md` for the index and per-demo `notes.md` for the narrative explanation. `results.md` files record the captured outputs (SHA256 hashes, line counts, byte-equality verdicts) so the demos double as regression evidence.
 
-| # | Folder                                       | Demonstrates                                                                                                                          | Key file to read first |
-|---|----------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------|------------------------|
-| 1 | [`01-lossless-roundtrip/`](./01-lossless-roundtrip/) | A composed file is its own self-extracting archive — decompose recovers every leaf byte-for-byte after the source library is moved away | [`results.md`](./01-lossless-roundtrip/results.md) (4 SHA256 matches) |
-| 2 | [`02-text-prose-output/`](./02-text-prose-output/)   | The same on-disk file has two external presentations: self-describing (with TOML + delimiters) vs prose (clean H2 sections)            | [`prose-form-output.md`](./02-text-prose-output/prose-form-output.md) |
-| 3 | [`03-deep-text-flattening/`](./03-deep-text-flattening/) | `--text` recurses through every level; a `body_level = 2` compound flattens to the same shape as a `body_level = 1` compound            | [`prose-output.md`](./03-deep-text-flattening/prose-output.md) |
-| 4 | [`04-structural-diff/`](./04-structural-diff/)       | `oovra compare` cuts through 26 lines of surface byte-level noise to identify two semantic version changes (and now reports `moved` inputs in v0.2) | [`compare-output-human.md`](./04-structural-diff/compare-output-human.md) |
-| 5 | [`05-mixed-order-regression/`](./05-mixed-order-regression/) | The body_level escalation fix: composing a compound with atoms requires the outer delimiter level to climb above any inner element's   | [`delimiter-analysis.md`](./05-mixed-order-regression/delimiter-analysis.md) and [`results.md`](./05-mixed-order-regression/results.md) |
+## v0.1 demos — architectural properties
 
-## Anatomy of each demo
+The five v0.1 demos verify the load-bearing architectural decisions made when Oovra was first built. They were captured before v0.2 existed and migrated in place by `oovra migrate`. The narrative descriptions still reference v0.1-era vocabulary in places; the on-disk files are valid v0.2.
+
+See [`v0.1/README.md`](./v0.1/README.md) for the full per-demo table. Headline results:
+
+| # | What's verified |
+|---|----------------|
+| 1 | Compounds are self-extracting archives — decompose works without library access |
+| 2 | One file has two external presentations (`--text` vs raw) |
+| 3 | Recursive flatten doesn't care about depth |
+| 4 | Recipes are first-class — diff cuts through prose-level noise |
+| 5 | `body_level` must always strictly escalate to prevent parser collisions |
+
+## v0.2 demos — operator-gamut and new-feature tests
+
+Demos written specifically for v0.2. See [`v0.2/README.md`](./v0.2/README.md):
+
+| # | What's verified |
+|---|----------------|
+| 1 | All four operators end-to-end via CLI; compare correctly fires on `added`, `removed`, `version_changed`, and `moved` simultaneously, with the spec-promised non-mutual-exclusivity of `version_changed` and `moved` |
+
+Future v0.2-era demos can be added under the same folder; the `NN-name/` naming convention preserves a stable ordering.
+
+## Anatomy of a demo
 
 Every demo follows the same shape:
 
 ```
 NN-demo-name/
-├── notes.md         — explanation: what's being demonstrated, why it matters, how it works under the hood
-├── results.md       — captured outputs and verdicts: byte-equality assertions, line counts, file sizes, structural-diff results
-├── library/         — the input/staged files the demo operates on (where applicable)
-└── recovered/       — output files produced during the demo (where applicable, e.g. `decompose --full` outputs)
+├── notes.md         — explanation: what's being demonstrated, why it matters
+├── results.md       — captured outputs and verdicts: hashes, byte-equality checks, diff outputs
+├── library/         — input fixtures (or `library-v1/`, `library-v2/` when the demo exercises a mutation)
+└── outputs/         — recovered/produced artifacts (compose outputs, decompose trees, JSON dumps)
 ```
 
-`notes.md` is the human-facing explanation. `results.md` is the machine-captured verdict — actual SHA256 sums, actual line counts, actual diff outputs. Together they tell you what was demonstrated and the evidence that it worked.
-
-## Mapping each demo to an architectural decision
-
-| Demo | Architectural decision being verified                                                                                                                |
-|------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 1    | **Body as source of truth, not header.** The composed body embeds full sub-element files. Decompose is lossless without library access.                |
-| 2    | **Two renderers, one source.** `render_body` (delimited, lossless) and `render_text` (flattened, paste-ready) serve different audiences from the same data. |
-| 3    | **Recursive flatten doesn't depend on depth.** `render_for_paste` is self-similar — split one level and recurse. Deep compounds flatten the same way as shallow ones. |
-| 4    | **Recipes are first-class, not derived from prose.** `composed_of` is a structural index that survives every prose change, every timestamp shift, every body edit. v0.2's sequence-aware diff also catches reorderings. |
-| 5    | **`body_level` must always strictly escalate.** The outer compound's delimiter tilde count must exceed every inner element's, regardless of whether the inputs are atoms or compounds. |
+`notes.md` is the human-facing explanation. `results.md` is the machine-captured verdict.
 
 ## Snapshot status
 
-These demos were captured against **Oovra v0.1.0** and migrated in place to **v0.2** as part of the schema migration. The library files now carry `kind = "atom"` / `kind = "compound"` in their frontmatters; the rendered outputs and captured `results.md` content are unchanged because the migration is a representation change, not a regeneration.
-
-If you re-run any demo today, you'll get fresh timestamps but identical structural outputs.
+- v0.1 demos: captured against Oovra v0.1.0; library files migrated in place to v0.2 schema. Original behavior preserved; if you re-run any demo today you get fresh timestamps but identical structural outputs.
+- v0.2 demos: captured against Oovra v0.2.0 (commit `3b34b25` or later). Reproducible via the commands embedded in each demo's `results.md` § "Reproducibility".
 
 ## See also
 

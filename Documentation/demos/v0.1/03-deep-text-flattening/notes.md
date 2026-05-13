@@ -68,7 +68,7 @@ You can compose elements at any depth — group atomics into role-specific sub-p
 
 ## See also
 
-- [reference/command-compose.md § Mode 2: --text](../../reference/command-compose.md#mode-2---text--print-clean-prose-to-stdout) — full reference for the prose-output mode (including the recursion contract)
-- [reference/kind-and-delimiters.md](../../reference/kind-and-delimiters.md) — the strict escalation rule that makes deep parsing unambiguous
-- [reference/command-decompose.md](../../reference/command-decompose.md) — `decompose` uses the same recursion in the other direction
+- [reference/command-compose.md § Mode 2: --text](../../../reference/command-compose.md#mode-2---text--print-clean-prose-to-stdout) — full reference for the prose-output mode (including the recursion contract)
+- [reference/kind-and-delimiters.md](../../../reference/kind-and-delimiters.md) — the strict escalation rule that makes deep parsing unambiguous
+- [reference/command-decompose.md](../../../reference/command-decompose.md) — `decompose` uses the same recursion in the other direction
 - [demos/02-text-prose-output](../02-text-prose-output/) — simpler one-level case of the same mechanism

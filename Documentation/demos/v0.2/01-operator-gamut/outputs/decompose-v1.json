@@ -1,0 +1,33 @@
+{
+  "element_id": "coding-agent",
+  "element_kind": "compound",
+  "element_version": "1.0.0",
+  "body_level": 1,
+  "render_mode": "markdown-h2",
+  "inputs": [
+    {
+      "id": "role-statement",
+      "version": "1.0.0",
+      "kind": "atom",
+      "name": "Role Statement"
+    },
+    {
+      "id": "refusal-policy",
+      "version": "1.0.0",
+      "kind": "atom",
+      "name": "Refusal Policy"
+    },
+    {
+      "id": "tone-direct",
+      "version": "1.0.0",
+      "kind": "atom",
+      "name": "Tone: Direct"
+    },
+    {
+      "id": "examples-block",
+      "version": "1.0.0",
+      "kind": "atom",
+      "name": "Examples Block"
+    }
+  ]
+}

@@ -16,8 +16,8 @@ The v0.1-era planning documents (efficacy rating, ceiling analysis, v0.2 scoping
 
 The shortest path to understanding what the tool does:
 
-1. **[`demos/01-lossless-roundtrip/notes.md`](./demos/01-lossless-roundtrip/notes.md)** and its [`results.md`](./demos/01-lossless-roundtrip/results.md) — concrete proof of the system's central claim that a compound is a self-extracting archive. ~5 minutes.
-2. **[`demos/02-text-prose-output/notes.md`](./demos/02-text-prose-output/notes.md)** — see the two external presentations of a single Oovra file. ~5 minutes.
+1. **[`demos/v0.1/01-lossless-roundtrip/notes.md`](./demos/v0.1/01-lossless-roundtrip/notes.md)** and its [`results.md`](./demos/v0.1/01-lossless-roundtrip/results.md) — concrete proof of the system's central claim that a compound is a self-extracting archive. ~5 minutes.
+2. **[`demos/v0.1/02-text-prose-output/notes.md`](./demos/v0.1/02-text-prose-output/notes.md)** — see the two external presentations of a single Oovra file. ~5 minutes.
 3. **[`reference/schema.md`](./reference/schema.md)** — the file format in detail. ~10 minutes.
 4. **[`reference/command-compose.md`](./reference/command-compose.md)** — the central operation. ~10 minutes.
 5. **Pick the rest as needed** — demos 3–5 for deeper architectural claims; remaining reference docs for command-by-command lookups.
@@ -102,12 +102,17 @@ Documentation/
 │   └── build-guide.md                      ← from-first-principles Rust construction guide
 │
 ├── demos/                                  ← end-to-end demonstrations
-│   ├── README.md                           ← demos index
-│   ├── 01-lossless-roundtrip/              ← proof: compound alone is a self-extracting archive
-│   ├── 02-text-prose-output/               ← the two external presentations of one file
-│   ├── 03-deep-text-flattening/            ← --text recurses through every level
-│   ├── 04-structural-diff/                 ← compare cuts through surface byte noise
-│   └── 05-mixed-order-regression/          ← the body_level escalation fix (now a regression test)
+│   ├── README.md                           ← top-level demos index
+│   ├── v0.1/                               ← five v0.1-era demos (migrated to v0.2 schema)
+│   │   ├── README.md                       ← v0.1 demos index
+│   │   ├── 01-lossless-roundtrip/          ← proof: compound alone is a self-extracting archive
+│   │   ├── 02-text-prose-output/           ← the two external presentations of one file
+│   │   ├── 03-deep-text-flattening/        ← --text recurses through every level
+│   │   ├── 04-structural-diff/             ← compare cuts through surface byte noise
+│   │   └── 05-mixed-order-regression/      ← the body_level escalation rule (now a regression test)
+│   └── v0.2/                               ← v0.2-era demos
+│       ├── README.md                       ← v0.2 demos index
+│       └── 01-operator-gamut/              ← full Create→Compose→Decompose→Compare run with all four diff axes
 │
 └── version-reports/
     └── v0.1/                               ← v0.1-era planning artifacts

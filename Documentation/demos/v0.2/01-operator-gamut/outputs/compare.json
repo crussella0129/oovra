@@ -1,0 +1,51 @@
+{
+  "kind": "structural",
+  "a_id": "coding-agent",
+  "b_id": "coding-agent",
+  "added": [
+    {
+      "position": 3,
+      "input": {
+        "id": "format-rules",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "removed": [
+    {
+      "position": 3,
+      "input": {
+        "id": "examples-block",
+        "version": "1.0.0"
+      }
+    }
+  ],
+  "version_changed": [
+    {
+      "id": "refusal-policy",
+      "before_version": "1.0.0",
+      "after_version": "2.0.0"
+    }
+  ],
+  "moved": [
+    {
+      "id": "refusal-policy",
+      "version": "2.0.0",
+      "before_pos": 1,
+      "after_pos": 0
+    },
+    {
+      "id": "tone-direct",
+      "version": "1.0.0",
+      "before_pos": 2,
+      "after_pos": 1
+    },
+    {
+      "id": "role-statement",
+      "version": "1.0.0",
+      "before_pos": 0,
+      "after_pos": 2
+    }
+  ],
+  "recipes_equal": false
+}
