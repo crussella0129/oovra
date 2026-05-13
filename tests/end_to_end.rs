@@ -8,7 +8,8 @@ use oovra::decompose::{decompose, decompose_full};
 use oovra::diff::{compare, DiffReport};
 use oovra::element::{parse_file, write};
 use oovra::library::Library;
-use oovra::render::{compose, ComposeRequest};
+use oovra::migrate::migrate_library;
+use oovra::render::{compose, render_text, ComposeRequest};
 
 /// Path to the sample library shipped in this repo.
 fn elements_dir() -> &'static Path {
@@ -648,6 +649,184 @@ fn depth_equals_body_level_for_every_compose() {
     .unwrap();
     assert_eq!(c2.header.body_level, Some(2));
     assert_eq!(c2.header.depth, Some(2));
+}
+
+#[test]
+fn migrate_rewrites_library_in_place() {
+    // SPEC §7.2: build a temp library with v0.1-format files (using
+    // `order = 0` and `order = 1` in frontmatter), run migrate_library,
+    // verify each file now parses as v0.2 with the correct kind.
+    let tmp = tempdir_for_test("migrate-in-place");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // Write two v0.1 atoms.
+    let atom_a = "+++\nname = \"Atom A\"\norder = 0\nid = \"atom-a\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nAtom A body.\n";
+    let atom_b = "+++\nname = \"Atom B\"\norder = 0\nid = \"atom-b\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nAtom B body.\n";
+    std::fs::write(tmp.join("atom-a.md"), atom_a).unwrap();
+    std::fs::write(tmp.join("atom-b.md"), atom_b).unwrap();
+
+    // Write a v0.1 compound whose body wraps two atoms in level-1 delimiters.
+    let compound = "+++\nname = \"Compound\"\norder = 1\nid = \"compound\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\nbody_level = 1\ncomposed_of = [{id = \"atom-a\", version = \"1.0.0\"}, {id = \"atom-b\", version = \"1.0.0\"}]\n+++\n\n~~>>\n+++\nname = \"Atom A\"\norder = 0\nid = \"atom-a\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nAtom A body.\n~~<<\n~~>>\n+++\nname = \"Atom B\"\norder = 0\nid = \"atom-b\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nAtom B body.\n~~<<\n";
+    std::fs::write(tmp.join("compound.md"), compound).unwrap();
+
+    let summary = migrate_library(&tmp).unwrap();
+    assert_eq!(summary.migrated.len(), 3, "all three files should migrate");
+    assert!(summary.failed.is_empty(), "no failures expected: {:?}", summary.failed);
+
+    // After migration, files parse cleanly in v0.2-only mode (no --legacy).
+    let migrated_a = parse_file(&tmp.join("atom-a.md")).unwrap();
+    assert_eq!(migrated_a.header.kind, oovra::header::PromptElementKind::Atom);
+    let migrated_compound = parse_file(&tmp.join("compound.md")).unwrap();
+    assert_eq!(
+        migrated_compound.header.kind,
+        oovra::header::PromptElementKind::Compound
+    );
+    assert_eq!(migrated_compound.header.body_level, Some(1));
+    assert_eq!(migrated_compound.header.depth, Some(1));
+    // generated_at is preserved verbatim per SPEC §10.2.
+    assert_eq!(
+        migrated_compound.header.generated_at.as_deref(),
+        Some("2026-05-09T14:23:15Z")
+    );
+}
+
+#[test]
+fn migrate_preserves_lossless_roundtrip() {
+    // SPEC §7.3 headline test: decompose a v0.1 compound, migrate the
+    // library, recompose, assert the resulting compound's --text output is
+    // whitespace-equivalent to the pre-migration --text output. (The
+    // recompose has a fresh generated_at, so frontmatter is NOT
+    // byte-identical; we compare the rendered prose.)
+    let tmp = tempdir_for_test("migrate-roundtrip");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // v0.1 atoms.
+    std::fs::write(
+        tmp.join("role.md"),
+        "+++\nname = \"Role\"\norder = 0\nid = \"role\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nYou are a senior engineer.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.join("tone.md"),
+        "+++\nname = \"Tone\"\norder = 0\nid = \"tone\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nBe direct.\n",
+    )
+    .unwrap();
+
+    // Pre-migration render: load the library in legacy mode, compose, capture --text output.
+    let pre_lib = Library::load_with(&tmp, oovra::element::ParseOptions { legacy: true }).unwrap();
+    let pre_compound = compose(ComposeRequest {
+        library: &pre_lib,
+        inputs: vec![("role".into(), None), ("tone".into(), None)],
+        output_id: "rt".into(),
+        output_name: "rt".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    let pre_text = render_text(&[&pre_compound]).unwrap();
+
+    // Migrate the library.
+    let summary = migrate_library(&tmp).unwrap();
+    assert_eq!(summary.migrated.len(), 2);
+    assert!(summary.failed.is_empty());
+
+    // Post-migration: same compose, same render. Should match.
+    let post_lib = Library::load(&tmp).unwrap();
+    let post_compound = compose(ComposeRequest {
+        library: &post_lib,
+        inputs: vec![("role".into(), None), ("tone".into(), None)],
+        output_id: "rt".into(),
+        output_name: "rt".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    let post_text = render_text(&[&post_compound]).unwrap();
+
+    assert_eq!(
+        pre_text.trim(),
+        post_text.trim(),
+        "rendered text drifted across migration"
+    );
+}
+
+#[test]
+fn migrate_recursively_rewrites_embedded_frontmatter() {
+    // Regression test for the body-recursion fix: a v0.1 compound's body
+    // contains wrapped sub-element files with their own (v0.1) frontmatters.
+    // The migration must rewrite both the outer frontmatter AND every
+    // embedded frontmatter, so subsequent v0.2-strict decompose succeeds.
+    let tmp = tempdir_for_test("migrate-recursive");
+    std::fs::create_dir_all(&tmp).unwrap();
+
+    // Build a v0.1 compound with two v0.1 atoms embedded in its body.
+    let compound = "+++\n\
+        name = \"Compound\"\n\
+        order = 1\n\
+        id = \"compound\"\n\
+        version = \"1.0.0\"\n\
+        meta = \"\"\n\
+        generated_at = \"2026-05-09T14:23:15Z\"\n\
+        render_mode = \"markdown-h2\"\n\
+        body_level = 1\n\
+        composed_of = [{id = \"alpha\", version = \"1.0.0\"}, {id = \"beta\", version = \"1.0.0\"}]\n\
+        +++\n\n\
+        ~~>>\n\
+        +++\n\
+        name = \"Alpha\"\n\
+        order = 0\n\
+        id = \"alpha\"\n\
+        version = \"1.0.0\"\n\
+        meta = \"\"\n\
+        +++\n\n\
+        Alpha body.\n\
+        ~~<<\n\
+        ~~>>\n\
+        +++\n\
+        name = \"Beta\"\n\
+        order = 0\n\
+        id = \"beta\"\n\
+        version = \"1.0.0\"\n\
+        meta = \"\"\n\
+        +++\n\n\
+        Beta body.\n\
+        ~~<<\n";
+    std::fs::write(tmp.join("compound.md"), compound).unwrap();
+
+    let summary = migrate_library(&tmp).unwrap();
+    assert_eq!(summary.migrated.len(), 1);
+    assert!(summary.failed.is_empty());
+
+    // After migration, decompose in v0.2-strict mode must succeed because
+    // every embedded frontmatter now carries `kind` instead of `order`.
+    let migrated = parse_file(&tmp.join("compound.md")).unwrap();
+    let leaves = decompose(&migrated).unwrap();
+    assert_eq!(leaves.len(), 2);
+    assert_eq!(leaves[0].header.id, "alpha");
+    assert_eq!(leaves[0].header.kind, oovra::header::PromptElementKind::Atom);
+    assert_eq!(leaves[1].header.id, "beta");
+    assert_eq!(leaves[1].header.kind, oovra::header::PromptElementKind::Atom);
+}
+
+#[test]
+fn migrate_is_idempotent_on_v0_2_files() {
+    // Running migrate on an already-v0.2 library should re-serialize but
+    // not change semantic content. The second migrate run should report
+    // 0 failures and the file content should re-parse identically.
+    let tmp = tempdir_for_test("migrate-idempotent");
+    std::fs::create_dir_all(&tmp).unwrap();
+    std::fs::write(
+        tmp.join("a.md"),
+        "+++\nname = \"A\"\nkind = \"atom\"\nid = \"a\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n",
+    )
+    .unwrap();
+    let summary1 = migrate_library(&tmp).unwrap();
+    assert_eq!(summary1.migrated.len(), 1);
+    let summary2 = migrate_library(&tmp).unwrap();
+    assert_eq!(summary2.migrated.len(), 1);
+    assert!(summary2.failed.is_empty());
+    let parsed = parse_file(&tmp.join("a.md")).unwrap();
+    assert_eq!(parsed.header.kind, oovra::header::PromptElementKind::Atom);
 }
 
 #[test]

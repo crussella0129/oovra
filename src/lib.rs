@@ -18,6 +18,7 @@ pub mod element;
 pub mod error;
 pub mod header;
 pub mod library;
+pub mod migrate;
 pub mod render;
 
 pub use element::{

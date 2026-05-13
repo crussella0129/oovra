@@ -24,15 +24,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::element::{
-    body_delimiter_close, body_delimiter_open, parse, serialize, PromptElement,
+    body_delimiter_close, body_delimiter_open, parse_with, serialize, ParseOptions, PromptElement,
 };
 use crate::error::{OovraError, Result};
 
 /// Split the body of a composed element into its K immediate sub-elements
-/// by scanning for level-`body_level` open/close delimiters (taken from the
-/// element's header). Each chunk between matched delimiters is parsed as a
-/// full Oovra file.
+/// in default (v0.2-only) parse mode. See [`decompose_with`] for legacy-aware
+/// decomposition.
 pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
+    decompose_with(element, ParseOptions::default())
+}
+
+/// Same as [`decompose`] but each sub-element is parsed with the given
+/// [`ParseOptions`]. `oovra migrate` uses this with `legacy: true` to walk
+/// v0.1 compounds whose body sub-elements still use the `order` schema.
+pub fn decompose_with(element: &PromptElement, opts: ParseOptions) -> Result<Vec<PromptElement>> {
     if element.header.is_atom() {
         return Err(OovraError::CannotDecomposeAtom {
             id: element.header.id.clone(),
@@ -99,11 +105,12 @@ pub fn decompose(element: &PromptElement) -> Result<Vec<PromptElement>> {
         });
     }
 
-    // Parse each chunk as a complete Oovra file.
+    // Parse each chunk as a complete Oovra file, honoring the caller's
+    // parse mode (legacy vs strict v0.2).
     let mut parsed: Vec<PromptElement> = Vec::with_capacity(chunks.len());
     let synthetic = PathBuf::from(format!("<{}:embedded>", element.header.id));
     for chunk in &chunks {
-        parsed.push(parse(chunk, &synthetic)?);
+        parsed.push(parse_with(chunk, &synthetic, opts)?);
     }
     Ok(parsed)
 }

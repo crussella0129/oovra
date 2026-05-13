@@ -17,6 +17,7 @@ use oovra::decompose::{decompose_full, report};
 use oovra::diff::{compare, DiffReport};
 use oovra::element::{parse_file_with, serialize, write, ParseOptions, PromptElement};
 use oovra::library::Library;
+use oovra::migrate::migrate_library;
 use oovra::render::{compose, render_text, ComposeRequest};
 
 #[derive(Parser, Debug)]
@@ -45,6 +46,9 @@ enum Command {
 
     /// Compare two prompt elements
     Compare(CompareArgs),
+
+    /// Migrate a v0.1 library to v0.2 schema in place
+    Migrate(MigrateArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -150,6 +154,13 @@ struct CompareArgs {
     format: String,
 }
 
+#[derive(clap::Args, Debug)]
+struct MigrateArgs {
+    /// Library directory to migrate in place. Recursive. Run in a clean
+    /// Git working directory so the diff is auditable.
+    library: PathBuf,
+}
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let opts = ParseOptions { legacy: cli.legacy };
@@ -158,6 +169,7 @@ fn main() -> anyhow::Result<()> {
         Command::Compose(args) => run_compose(args, opts),
         Command::Decompose(args) => run_decompose(args, opts),
         Command::Compare(args) => run_compare(args, opts),
+        Command::Migrate(args) => run_migrate(args),
     }
 }
 
@@ -458,6 +470,35 @@ fn run_compare(args: CompareArgs, opts: ParseOptions) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn run_migrate(args: MigrateArgs) -> anyhow::Result<()> {
+    eprintln!(
+        "{} migrating {} (in-place; back up with git before running)",
+        "WARNING:".yellow().bold(),
+        args.library.display()
+    );
+    let summary = migrate_library(&args.library)?;
+    println!(
+        "{} {} migrated, {} skipped, {} failed",
+        "Migrate".green().bold(),
+        summary.migrated.len(),
+        summary.skipped.len(),
+        summary.failed.len()
+    );
+    for path in &summary.migrated {
+        println!("  {} {}", "✓".green(), path.display());
+    }
+    for (path, reason) in &summary.skipped {
+        println!("  {} {} ({})", "-".dimmed(), path.display(), reason);
+    }
+    for (path, err) in &summary.failed {
+        eprintln!("  {} {}: {}", "✗".red(), path.display(), err);
+    }
+    if !summary.failed.is_empty() {
+        anyhow::bail!("{} file(s) failed to migrate", summary.failed.len());
+    }
     Ok(())
 }
 
