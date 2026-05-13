@@ -1,9 +1,15 @@
-//! Compare: the FORWARD-DIFF operator with kind-aware dispatch.
+//! Compare: the FORWARD-DIFF operator with kind-aware, sequence-aware dispatch.
 //!
 //! - **Both atoms** → content diff (body unified diff + metadata changes).
-//! - **Both compounds** → structural diff over `composed_of`. Reports inputs
-//!   added, removed, and version-changed.
+//! - **Both compounds** → structural diff over `composed_of`, four axes
+//!   (`added`, `removed`, `version_changed`, `moved`). The four axes are not
+//!   mutually exclusive: a version-changed input that also moved positions
+//!   surfaces on both `version_changed` and `moved`. `recipes_equal` is true
+//!   iff all four lists are empty.
 //! - **Mixed (atom vs compound)** → refused with a clear error.
+//!
+//! Sequence-awareness matters because reordering inputs changes the rendered
+//! output. v0.1 was order-blind for `composed_of`; v0.2 fixes that.
 
 use std::collections::HashMap;
 
@@ -39,15 +45,41 @@ pub struct FieldChange {
     pub after: String,
 }
 
-/// Diff of two compounds.
+/// Diff of two compounds. v0.2 is sequence-aware: position changes are
+/// surfaced via the `moved` list.
 #[derive(Debug, Serialize)]
 pub struct StructuralDiff {
     pub a_id: String,
     pub b_id: String,
-    pub added: Vec<InputRef>,
-    pub removed: Vec<InputRef>,
+    /// Inputs present in `b` but not in `a`. Position is `b`-side.
+    pub added: Vec<PositionedInput>,
+    /// Inputs present in `a` but not in `b`. Position is `a`-side.
+    pub removed: Vec<PositionedInput>,
+    /// Inputs present in both with the same id but a different version pin.
     pub version_changed: Vec<VersionChange>,
+    /// Inputs present in both with the same id and version but at a different
+    /// position in the `composed_of` array. Reordering changes the rendered
+    /// output, so this is a real diff.
+    pub moved: Vec<Move>,
+    /// True iff added, removed, version_changed, and moved are all empty.
     pub recipes_equal: bool,
+}
+
+/// One input together with its position in the input list.
+#[derive(Debug, Clone, Serialize)]
+pub struct PositionedInput {
+    pub position: usize,
+    pub input: InputRef,
+}
+
+/// An input that exists in both compounds with the same `id@version` but at
+/// a different position in `composed_of`.
+#[derive(Debug, Clone, Serialize)]
+pub struct Move {
+    pub id: String,
+    pub version: String,
+    pub before_pos: usize,
+    pub after_pos: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -128,41 +160,70 @@ fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDif
     let a_inputs = a.header.composed_of.as_ref().expect("compound has composed_of");
     let b_inputs = b.header.composed_of.as_ref().expect("compound has composed_of");
 
-    let a_by_id: HashMap<&str, &str> = a_inputs
+    // Index each side by id → (position, version). Duplicate ids within a
+    // single composed_of are rare but possible; the second occurrence wins,
+    // which means duplicate-id moves will not be detected. Documented in
+    // the module docstring.
+    let a_by_id: HashMap<&str, (usize, &str)> = a_inputs
         .iter()
-        .map(|i| (i.id.as_str(), i.version.as_str()))
+        .enumerate()
+        .map(|(pos, i)| (i.id.as_str(), (pos, i.version.as_str())))
         .collect();
-    let b_by_id: HashMap<&str, &str> = b_inputs
+    let b_by_id: HashMap<&str, (usize, &str)> = b_inputs
         .iter()
-        .map(|i| (i.id.as_str(), i.version.as_str()))
+        .enumerate()
+        .map(|(pos, i)| (i.id.as_str(), (pos, i.version.as_str())))
         .collect();
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut version_changed = Vec::new();
+    let mut moved = Vec::new();
 
-    for input in b_inputs {
+    // Walk b: classify each b-input as added (id not in a), version_changed
+    // (id in a, version differs), and/or moved (id in a, position differs).
+    // version_changed and moved are not mutually exclusive — a single input
+    // can both have its pin bumped and shift position; both axes report it.
+    for (b_pos, input) in b_inputs.iter().enumerate() {
         match a_by_id.get(input.id.as_str()) {
-            Some(a_ver) if *a_ver != input.version.as_str() => {
-                version_changed.push(VersionChange {
-                    id: input.id.clone(),
-                    before_version: a_ver.to_string(),
-                    after_version: input.version.clone(),
-                });
+            Some(&(a_pos, a_ver)) => {
+                if a_ver != input.version.as_str() {
+                    version_changed.push(VersionChange {
+                        id: input.id.clone(),
+                        before_version: a_ver.to_string(),
+                        after_version: input.version.clone(),
+                    });
+                }
+                if a_pos != b_pos {
+                    moved.push(Move {
+                        id: input.id.clone(),
+                        version: input.version.clone(),
+                        before_pos: a_pos,
+                        after_pos: b_pos,
+                    });
+                }
             }
-            None => added.push(input.clone()),
-            _ => {}
+            None => added.push(PositionedInput {
+                position: b_pos,
+                input: input.clone(),
+            }),
         }
     }
 
-    for input in a_inputs {
+    // Walk a: classify each a-input absent from b as removed.
+    for (a_pos, input) in a_inputs.iter().enumerate() {
         if !b_by_id.contains_key(input.id.as_str()) {
-            removed.push(input.clone());
+            removed.push(PositionedInput {
+                position: a_pos,
+                input: input.clone(),
+            });
         }
     }
 
-    let recipes_equal =
-        added.is_empty() && removed.is_empty() && version_changed.is_empty();
+    let recipes_equal = added.is_empty()
+        && removed.is_empty()
+        && version_changed.is_empty()
+        && moved.is_empty();
 
     Ok(StructuralDiff {
         a_id: a.header.id.clone(),
@@ -170,6 +231,7 @@ fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDif
         added,
         removed,
         version_changed,
+        moved,
         recipes_equal,
     })
 }

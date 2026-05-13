@@ -369,10 +369,173 @@ fn compare_structural_diff_detects_version_change() {
         DiffReport::Structural(s) => {
             assert!(s.added.is_empty());
             assert!(s.removed.is_empty());
+            assert!(s.moved.is_empty(), "no reorder, no move");
             assert_eq!(s.version_changed.len(), 1);
             assert_eq!(s.version_changed[0].id, "refusal-policy-strict");
             assert_eq!(s.version_changed[0].before_version, "1.0.0");
             assert_eq!(s.version_changed[0].after_version, "1.1.0");
+        }
+        DiffReport::Content(_) => panic!("expected structural diff for compounds"),
+    }
+}
+
+#[test]
+fn compare_detects_reorder() {
+    // SPEC §6 (sequence-aware compare): swapping input order produces a
+    // diff with `moved` populated and `recipes_equal = false`.
+    let library = Library::load(elements_dir()).unwrap();
+    let v1 = compose(ComposeRequest {
+        library: &library,
+        inputs: vec![
+            ("role-declaration".into(), None),
+            ("refusal-policy-strict".into(), None),
+            ("tone-direct".into(), None),
+        ],
+        output_id: "abc".into(),
+        output_name: "abc".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    let v2 = compose(ComposeRequest {
+        library: &library,
+        inputs: vec![
+            ("tone-direct".into(), None),
+            ("refusal-policy-strict".into(), None),
+            ("role-declaration".into(), None),
+        ],
+        output_id: "cba".into(),
+        output_name: "cba".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    match compare(&v1, &v2).unwrap() {
+        DiffReport::Structural(s) => {
+            assert!(s.added.is_empty());
+            assert!(s.removed.is_empty());
+            assert!(s.version_changed.is_empty());
+            assert!(!s.recipes_equal, "reorder is a real change");
+            // role-declaration (0→2) and tone-direct (2→0) both moved.
+            // refusal-policy-strict stays at position 1.
+            assert_eq!(s.moved.len(), 2);
+            let by_id: std::collections::HashMap<_, _> = s
+                .moved
+                .iter()
+                .map(|m| (m.id.as_str(), (m.before_pos, m.after_pos)))
+                .collect();
+            assert_eq!(by_id.get("role-declaration"), Some(&(0, 2)));
+            assert_eq!(by_id.get("tone-direct"), Some(&(2, 0)));
+        }
+        DiffReport::Content(_) => panic!("expected structural diff for compounds"),
+    }
+}
+
+#[test]
+fn compare_distinguishes_move_from_add_remove() {
+    // SPEC §6: when an input is moved in addition to other inputs being
+    // swapped in/out, the move is reported as a move (not as add+remove).
+    // Setup: a -> [role, refusal, tone], b -> [tone, refusal, examples].
+    //   * role: removed (pos 0)
+    //   * examples: added (pos 2)
+    //   * refusal: stays at pos 1 (no change)
+    //   * tone: moved 2 -> 0
+    let library = Library::load(elements_dir()).unwrap();
+    let v1 = compose(ComposeRequest {
+        library: &library,
+        inputs: vec![
+            ("role-declaration".into(), None),
+            ("refusal-policy-strict".into(), None),
+            ("tone-direct".into(), None),
+        ],
+        output_id: "v1".into(),
+        output_name: "v1".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    let v2 = compose(ComposeRequest {
+        library: &library,
+        inputs: vec![
+            ("tone-direct".into(), None),
+            ("refusal-policy-strict".into(), None),
+            ("examples-block".into(), None),
+        ],
+        output_id: "v2".into(),
+        output_name: "v2".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+    match compare(&v1, &v2).unwrap() {
+        DiffReport::Structural(s) => {
+            assert_eq!(s.removed.len(), 1);
+            assert_eq!(s.removed[0].input.id, "role-declaration");
+            assert_eq!(s.removed[0].position, 0);
+            assert_eq!(s.added.len(), 1);
+            assert_eq!(s.added[0].input.id, "examples-block");
+            assert_eq!(s.added[0].position, 2);
+            assert!(s.version_changed.is_empty());
+            assert_eq!(s.moved.len(), 1);
+            assert_eq!(s.moved[0].id, "tone-direct");
+            assert_eq!(s.moved[0].before_pos, 2);
+            assert_eq!(s.moved[0].after_pos, 0);
+            assert!(!s.recipes_equal);
+        }
+        DiffReport::Content(_) => panic!("expected structural diff for compounds"),
+    }
+}
+
+#[test]
+fn compare_reports_pure_version_change_not_as_move() {
+    // SPEC §6: a version bump at the same position is reported only as
+    // version_changed, not as a move.
+    let library = Library::load(elements_dir()).unwrap();
+    let v1 = compose(ComposeRequest {
+        library: &library,
+        inputs: vec![
+            ("role-declaration".into(), None),
+            ("tone-direct".into(), None),
+        ],
+        output_id: "stable".into(),
+        output_name: "Stable".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+
+    // Bump tone-direct's version in a staged library, recompose.
+    let tmp = tempdir_for_test("pure-version-bump");
+    for entry in std::fs::read_dir(elements_dir()).unwrap() {
+        let p = entry.unwrap().path();
+        std::fs::copy(&p, tmp.join(p.file_name().unwrap())).unwrap();
+    }
+    let bumped_path = tmp.join("tone-direct.md");
+    let mut bumped = parse_file(&bumped_path).unwrap();
+    bumped.header.version = "1.1.0".into();
+    write(&bumped, &bumped_path).unwrap();
+    let bumped_lib = Library::load(&tmp).unwrap();
+    let v2 = compose(ComposeRequest {
+        library: &bumped_lib,
+        inputs: vec![
+            ("role-declaration".into(), None),
+            ("tone-direct".into(), None),
+        ],
+        output_id: "stable".into(),
+        output_name: "Stable".into(),
+        output_version: "1.0.0".into(),
+        output_meta: String::new(),
+    })
+    .unwrap();
+
+    match compare(&v1, &v2).unwrap() {
+        DiffReport::Structural(s) => {
+            assert!(s.added.is_empty());
+            assert!(s.removed.is_empty());
+            assert!(s.moved.is_empty(), "no position change");
+            assert_eq!(s.version_changed.len(), 1);
+            assert_eq!(s.version_changed[0].id, "tone-direct");
+            assert!(!s.recipes_equal);
         }
         DiffReport::Content(_) => panic!("expected structural diff for compounds"),
     }

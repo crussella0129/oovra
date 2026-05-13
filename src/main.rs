@@ -400,14 +400,24 @@ fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
             } else {
                 if !s.added.is_empty() {
                     println!("  added inputs:");
-                    for i in &s.added {
-                        println!("    {} {}", "+".green(), format!("{} @ {}", i.id, i.version).green());
+                    for pi in &s.added {
+                        println!(
+                            "    {} [{}] {}",
+                            "+".green(),
+                            pi.position,
+                            format!("{} @ {}", pi.input.id, pi.input.version).green()
+                        );
                     }
                 }
                 if !s.removed.is_empty() {
                     println!("  removed inputs:");
-                    for i in &s.removed {
-                        println!("    {} {}", "-".red(), format!("{} @ {}", i.id, i.version).red());
+                    for pi in &s.removed {
+                        println!(
+                            "    {} [{}] {}",
+                            "-".red(),
+                            pi.position,
+                            format!("{} @ {}", pi.input.id, pi.input.version).red()
+                        );
                     }
                 }
                 if !s.version_changed.is_empty() {
@@ -419,6 +429,19 @@ fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
                             v.id.cyan(),
                             v.before_version.red(),
                             v.after_version.green()
+                        );
+                    }
+                }
+                if !s.moved.is_empty() {
+                    println!("  moved inputs:");
+                    for m in &s.moved {
+                        println!(
+                            "    {} {} @ {} : pos {} -> pos {}",
+                            "↔".blue(),
+                            m.id.cyan(),
+                            m.version.dimmed(),
+                            m.before_pos.to_string().red(),
+                            m.after_pos.to_string().green()
                         );
                     }
                 }
