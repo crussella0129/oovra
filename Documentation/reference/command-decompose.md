@@ -16,7 +16,7 @@ oovra decompose <PATH> --full -o <OUTPUT_DIR>         # recursive write to disk
 
 Reads the file at `<PATH>` and splits its body at the level-`body_level` delimiter pair (`(body_level+1)` tildes + `>>` open, + `<<` close). Each chunk between matched delimiters is itself a complete Oovra file (frontmatter + body). What happens next depends on the mode.
 
-**Critical property**: decompose **does not consult any library**. The compound file's body alone is sufficient to recover every embedded input. This is the load-bearing claim of Oovra's self-describing design — see [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) for the proof.
+**Critical property**: decompose **does not consult any library**. The compound file's body alone is sufficient to recover every embedded input. This is the load-bearing claim of Oovra's self-describing design — see [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) for the proof.
 
 ---
 
@@ -146,7 +146,7 @@ Every leaf file written by `--full` is **byte-identical** to the original input 
 
 The `--full` operation can be thought of as a self-extracting archive: hand someone a compound file at any depth, they can `decompose --full` it, and they recover the entire library that produced it — names, versions, meta descriptions, body prose — at byte precision.
 
-See [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) for an end-to-end SHA256-verified proof.
+See [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) for an end-to-end SHA256-verified proof, and [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) for the same property verified against the v0.2 schema.
 
 ### Example
 
@@ -187,7 +187,7 @@ out/
         └── file-citation-rules.md
 ```
 
-See [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) for the body_level-2 case in full detail.
+See [demos/v0.1/03-deep-text-flattening](../demos/v0.1/03-deep-text-flattening/) for the body_level-2 case in full detail.
 
 ### What `--full` doesn't do
 
@@ -219,6 +219,7 @@ The parser reads `body_level` from the file's frontmatter and looks for *exactly
 - [command-compose.md](./command-compose.md) — the inverse operation
 - [schema.md](./schema.md) — the file format decompose reads
 - [kind-and-delimiters.md](./kind-and-delimiters.md) — the chiral delimiter scheme used to split bodies
-- [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) — byte-equality demonstration on a simple case
-- [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) — body_level-2 composition with full structure
-- [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) — decompose succeeding on the previously-broken mixed-input case
+- [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) — byte-equality demonstration on a simple case
+- [demos/v0.1/03-deep-text-flattening](../demos/v0.1/03-deep-text-flattening/) — body_level-2 composition with full structure
+- [demos/v0.1/05-mixed-order-regression](../demos/v0.1/05-mixed-order-regression/) — decompose succeeding on the previously-broken mixed-input case
+- [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) — byte-equality reproduced against the v0.2 schema

@@ -177,7 +177,7 @@ If one of the input IDs is itself a compound element, the recursion descends int
 oovra compose --library ./elements --text coding-agent
 ```
 
-produces the same three H2 sections as if you had typed the three atom IDs directly. The compound wrapper is invisible in the prose form. See [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) for a body_level-2 example.
+produces the same three H2 sections as if you had typed the three atom IDs directly. The compound wrapper is invisible in the prose form. See [demos/v0.1/03-deep-text-flattening](../demos/v0.1/03-deep-text-flattening/) for a body_level-2 example.
 
 ### Failure modes
 
@@ -287,5 +287,6 @@ The two are numerically equal for every valid compound; `depth` is exposed as a 
 - [kind-and-delimiters.md](./kind-and-delimiters.md) — the formulas and the delimiter spec
 - [command-decompose.md](./command-decompose.md) — the inverse operation; reads what Compose produces
 - [errors.md](./errors.md) — every error Compose can surface
-- [demos/03-deep-text-flattening](../demos/03-deep-text-flattening/) — `--text` on a body_level-2 compound
-- [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) — the mixed-input case the strict-escalation rule was designed for
+- [demos/v0.1/03-deep-text-flattening](../demos/v0.1/03-deep-text-flattening/) — `--text` on a body_level-2 compound
+- [demos/v0.1/05-mixed-order-regression](../demos/v0.1/05-mixed-order-regression/) — the mixed-input case the strict-escalation rule was designed for
+- [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) — full Compose→Decompose→Compare run with two library snapshots

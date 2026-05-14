@@ -203,4 +203,5 @@ The parser's joint validator rejects any file with `kind = "compound"` that lack
 - [schema.md](./schema.md) — the file format `create` produces
 - [command-compose.md](./command-compose.md) — how to combine atoms into compounds
 - [errors.md](./errors.md) — all validation errors `create` can surface
-- [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) — uses `create --new` to scaffold four atoms before composing them
+- [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) — uses `create --new` to scaffold four atoms before composing them
+- [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) — five-atom scaffolding via `create --new` plus the full operator gamut

@@ -9,13 +9,12 @@ A Rust based, Obsidian compatible tool for the **composition** and **comparison*
 
 ## What it does
 
-Oovra is built around **one file format** — Markdown with TOML frontmatter — and **one numeric discriminator**: an `order` field.
+Oovra is built around **one file format** — Markdown with TOML frontmatter — and **one discriminator**: a `kind` field with exactly two values.
 
-- An **order-0 element** is atomic — a hand-authored sentence or paragraph representing a primitive prompt element, such as a basic rule, instruction, policy, or context providing statement.
-- An **order-1 element** is a composition of order-0 elements, produced by `oovra compose`.
-- An **order-N element** is what you get when you compose elements that include at least two peers at order N−1. Order encodes compositional depth.
+- A **`kind = "atom"`** element is hand-authored — a sentence or paragraph representing a primitive prompt element, such as a basic rule, instruction, policy, or context-providing statement.
+- A **`kind = "compound"`** element is a composition produced by `oovra compose`. It carries a `composed_of` recipe plus composition metadata (`generated_at`, `render_mode`, `body_level`, `depth`).
 
-Every composed element is **self-describing and losslessly decomposable**: the body of an order-N element contains the complete files of its inputs (each itself an Oovra file), wrapped in chiral order-aware delimiters. `oovra decompose --full` recursively splits all the way down to order-0 leaves with full metadata intact — even on a file you just downloaded with no library context.
+Every compound is **self-describing and losslessly decomposable**: its body contains the complete files of its inputs (each itself an Oovra file), wrapped in chiral level-aware delimiters that strictly escalate with composition depth. `oovra decompose --full` recursively splits all the way down to atom leaves with full metadata intact — even on a file you just downloaded with no library context.
 
 ## Install / build
 
@@ -56,10 +55,10 @@ cargo build --release
 ## Quick tour
 
 ```bash
-# Author an order-0 element
+# Author an atom
 oovra create --new role-declaration --library ./elements --name "Role Declaration"
 
-# Compose three order-0 elements into an order-1
+# Compose three atoms into a compound
 oovra compose --library ./elements \
   --out-id coding-agent --out-name "Coding Agent" \
   -o ./elements/coding-agent.md \
@@ -72,21 +71,27 @@ oovra compose --library ./elements --text \
 # Decompose one level down — list the immediate inputs
 oovra decompose ./elements/coding-agent.md
 
-# Decompose all the way to order-0 leaves as a folder tree
+# Decompose all the way to atom leaves as a folder tree
 oovra decompose --full -o ./out ./elements/coding-agent.md
 
-# Diff two compositions structurally (added/removed/version-changed inputs)
+# Diff two compositions structurally (added/removed/version-changed/moved inputs)
 oovra compare ./elements/coding-agent-v1.md ./elements/coding-agent-v2.md
+
+# Migrate a v0.1 library to v0.2 schema in place
+oovra migrate ./elements
 ```
 
-## The four operators
+## The four operators (and one migration helper)
 
 | Operator | What it does | Sheet analog |
 |---|---|---|
-| `oovra create` | Author a new order-0 element (or label an existing `.md`) | (cell entry) |
-| `oovra compose` | Join ordered inputs into a higher-order element | JOIN |
-| `oovra decompose` | Recover the inputs of a composed element (one level or `--full`) | SPLIT |
-| `oovra compare` | Diff two elements (kind-aware: content for order-0, structural for order ≥1) | FORWARD-DIFF |
+| `oovra create` | Author a new atom (or label an existing `.md`) | (cell entry) |
+| `oovra compose` | Join ordered inputs into a compound | JOIN |
+| `oovra decompose` | Recover the inputs of a compound (one level or `--full`) | SPLIT |
+| `oovra compare` | Diff two elements (kind-aware: content for atoms, **sequence-aware structural** for compounds) | FORWARD-DIFF |
+| `oovra migrate` | Walk a v0.1 library and rewrite every file in v0.2 schema, in place | — |
+
+`oovra compare` on two compounds reports four axes — `added`, `removed`, `version_changed`, and `moved` (the last new in v0.2). The axes are not mutually exclusive: a single input that has both been version-bumped *and* moved appears on both lists.
 
 ## File format
 
@@ -95,31 +100,30 @@ Every Oovra file is one `.md` with this exact shape:
 ```toml
 +++
 name = "Human-Readable Name"
-order = 0
+kind = "atom"
 id = "kebab-case-id"
 version = "1.0.0"
 meta = "optional description; may be empty"
 +++
 
-(body — freeform Markdown for order-0;
- wrapped sub-element files for order ≥ 1)
+(body — freeform Markdown for atoms;
+ wrapped sub-element files for compounds)
 ```
 
-For composed elements, the header also has `generated_at` (RFC 3339), `render_mode` (e.g. `"markdown-h2"`), `body_level` (an integer ≥ 1 governing the body delimiter), and `composed_of` (an array of `{id, version}` immediate-input records).
+Compounds also carry `generated_at` (RFC 3339), `render_mode` (e.g. `"markdown-h2"`), `body_level` (an integer ≥ 1 governing the body delimiter), `depth` (the human-readable compositional-depth label, numerically equal to `body_level`), and `composed_of` (an array of `{id, version}` immediate-input records).
 
-The body delimiter for a level-`N` composed element is `(N+1)`-tildes + `>>` to open and `(N+1)`-tildes + `<<` to close. So `body_level = 1` uses `~~>>` / `~~<<`, `body_level = 2` uses `~~~>>` / `~~~<<`, etc. The level is `max(input.order) + 1`, which always escalates strictly above any input's own body delimiter — chiral, monotonic, never collides with normal Markdown.
+The body delimiter for a `body_level = N` compound is `(N+1)`-tildes + `>>` to open and `(N+1)`-tildes + `<<` to close. So `body_level = 1` uses `~~>>` / `~~<<`, `body_level = 2` uses `~~~>>` / `~~~<<`, etc. The level is always `max(input.body_level) + 1`, which strictly escalates above any input's own body delimiter — chiral, monotonic, never collides with normal Markdown.
 
-See [SCHEMA.md](./SCHEMA.md) for the full schema.
+See [`Documentation/reference/schema.md`](./Documentation/reference/schema.md) for the canonical schema reference.
 
 ## Documentation
 
 The full user-facing documentation lives at [`Documentation/`](./Documentation/). Start at [`Documentation/README.md`](./Documentation/README.md) for the navigation hub. Highlights:
 
 - **[`Documentation/reference/`](./Documentation/reference/)** — feature-by-feature specifications: every command, every flag, every error variant, every schema field.
-- **[`Documentation/demos/`](./Documentation/demos/)** — five end-to-end demos with captured outputs and verdicts (lossless round-trip, prose rendering, deep flattening, structural diff, mixed-order regression).
-- **[`Documentation/build-guide.md`](./Documentation/build-guide.md)** — the from-first-principles construction guide for anyone reimplementing this from scratch.
-
-The terse machine-facing schema contract is at [`SCHEMA.md`](./SCHEMA.md).
+- **[`Documentation/demos/`](./Documentation/demos/)** — end-to-end demos with captured outputs and verdicts, split by version (`v0.1/` covers lossless round-trip, prose rendering, deep flattening, structural diff, mixed-order regression; `v0.2/` covers the full operator gamut with sequence-aware compare).
+- **[`Documentation/reference/build-guide.md`](./Documentation/reference/build-guide.md)** — the from-first-principles construction guide for anyone reimplementing this from scratch.
+- **[`CHANGELOG.md`](./CHANGELOG.md)** — v0.1 → v0.2 change list.
 
 ## Why TOML, not YAML or JSON
 
@@ -137,7 +141,9 @@ Every Oovra file is a valid Markdown file, so the entire library is also a valid
 
 ## Status
 
-v0.1 — working. 32 tests passing (21 unit + 11 integration), including regression tests for the mixed-order body-delimiter collision case and the create-with-invalid-id orphan-file case. See [`Documentation/reference/build-guide.md`](./Documentation/reference/build-guide.md) for the from-first-principles step-by-step build guide derived from this codebase.
+**v0.2 — shipped.** 46 tests passing (27 unit + 19 integration), including regression tests for the mixed-input body-delimiter collision case, the create-with-invalid-id orphan-file case, and the recursive frontmatter-rewrite case caught during the v0.1→v0.2 migration tooling work. See [`Documentation/reference/build-guide.md`](./Documentation/reference/build-guide.md) for the from-first-principles step-by-step build guide derived from this codebase.
+
+v0.1 documents and planning artifacts live under [`Documentation/version-reports/v0.1/`](./Documentation/version-reports/v0.1/) as the historical record.
 
 ## License
 

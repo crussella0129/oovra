@@ -2,7 +2,7 @@
 name = "Oovra Build Guide (v0.2, derived from working code)"
 kind = "atom"
 id = "oovra-build-guide"
-version = "0.5.0"
+version = "0.6.0"
 meta = "Step-by-step from-first-principles guide for building Oovra in Rust, derived from the v0.2 codebase. Written for someone who has never written Rust."
 +++
 
@@ -10,11 +10,11 @@ meta = "Step-by-step from-first-principles guide for building Oovra in Rust, der
 
 > An **œuvre** is a body of work — the collected output of a maker. Oovra (the phonetic spelling) treats system prompts as composed works: assembled from named, versioned **prompt elements** that form your personal corpus. Each prompt you ship is an entry in your œuvre.
 
-> **v0.2 migration note.** This guide reflects the v0.2 schema: every element is either an **atom** (`kind = "atom"`, hand-authored) or a **compound** (`kind = "compound"`, produced by `oovra compose`). The v0.1 numeric `order` field has been replaced by `kind`. If you have v0.1 files on disk, run `oovra migrate <library-dir>` to convert them in place.
+> **v0.2 migration note.** This guide reflects the v0.2 schema: every element is either an **atom** (`kind = "atom"`, hand-authored) or a **compound** (`kind = "compound"`, produced by `oovra compose`). The v0.1 numeric `order` field has been replaced by `kind`. If you have v0.1 files on disk, run `oovra migrate <library-dir>` to convert them in place — `migrate` is itself a Stage 5 operator described later in this guide.
 
 This is a **learn-by-doing** guide for building Oovra in Rust. It is derived from a complete working v0.2 implementation — every pattern below is in the codebase, and every tradeoff was decided in the act of building. Where the original spec said "do X," this guide says "do X, **here is what that actually looks like in Rust**, and here is **why** the alternative was rejected."
 
-The build is in **four stages**, mirroring the four operators of the Sheet algebra you're porting:
+The build is in **five stages**, mirroring the four operators of the Sheet algebra you're porting plus the v0.2 migration tool:
 
 | Sheet operator | Oovra operator | Stage |
 |---|---|---|
@@ -22,6 +22,7 @@ The build is in **four stages**, mirroring the four operators of the Sheet algeb
 | JOIN (`A1:G1 → H1`) | `oovra compose` | Stage 3 |
 | SPLIT (`B3 → C3:H3`) | `oovra decompose` | Stage 3 |
 | FORWARD-DIFF (`B10, C10 → D10`) | `oovra compare` | Stage 4 |
+| (rewrite all cells) | `oovra migrate` | Stage 5 |
 
 Stage 1 builds the parser and schema that every operator depends on.
 
@@ -191,8 +192,10 @@ Edit `Cargo.toml`:
 
 [package]
 name = "oovra"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+description = "A Rust tool for composition and comparison of agentic system prompts from Markdown+TOML 'prompt elements'"
+license = "MIT OR Apache-2.0"
 
 [dependencies]
 serde       = { version = "1", features = ["derive"] }
@@ -223,17 +226,18 @@ Module layout (each gets its own file in `src/`):
 | Module | Responsibility |
 |---|---|
 | `error` | `OovraError` enum with `thiserror` |
-| `header` | `PromptElementHeader`, `InputRef`, validators |
-| `element` | parser, splitter, serializer, body delimiter functions |
-| `library` | recursive directory loader |
+| `header` | `PromptElementHeader`, `InputRef`, `PromptElementKind`, `LegacyHeader`, validators |
+| `element` | parser, splitter, serializer, body delimiter functions, `ParseOptions` |
+| `library` | recursive directory loader (legacy-aware) |
 | `render` | Compose pipeline + `compute_body_level` + `compute_depth` |
-| `decompose` | one-level + `--full` recursive folder writer |
-| `diff` | Compare with kind-aware dispatch |
-| `create` | scaffold + label |
+| `decompose` | one-level + `--full` recursive folder writer + `decompose_with` |
+| `diff` | Compare with kind-aware, **sequence-aware** structural dispatch |
+| `create` | scaffold + label (both always produce atoms) |
+| `migrate` | Stage 5: walk a library, rewrite each file in v0.2 schema in place |
 | `lib` | public re-exports |
 | `main` | clap-derive CLI |
 
-Keep modules small and single-purpose. If a module starts pushing past 400 lines, split it.
+Keep modules small and single-purpose. If a module starts pushing past 400 lines, split it. As of the v0.2 release, `element.rs` is the largest at ~590 lines (the joint validator is dense); the others are well under 300.
 
 #### 1.5 — Define the data structures
 
@@ -399,32 +403,51 @@ fn validate_header(header: &PromptElementHeader, body: &str, path: &Path) -> Res
         return Err(OovraError::EmptyBody(path.to_path_buf()));
     }
 
-    // Joint invariant: compounds have all five companion fields; atoms have
-    // none of them. Kind drives the dispatch.
-    if header.is_compound() {
-        // composed_of is Some — generated_at, render_mode, body_level, depth all required
-        let generated_at = header.generated_at.as_deref()
-            .ok_or_else(|| OovraError::CompoundMissingField { /* ... */ })?;
-        if !is_valid_rfc3339(generated_at) { /* error */ }
-        // render_mode, body_level, depth required; composed_of must be non-empty;
-        // every composed_of entry must have kebab-case id and semver version.
-    } else {
-        // kind = Atom — all five companion fields must be None
-        if header.generated_at.is_some()
-            || header.render_mode.is_some()
-            || header.body_level.is_some()
-            || header.depth.is_some()
-            || header.composed_of.is_some()
-        {
-            return Err(OovraError::InvalidField { /* ... */ });
+    // Joint invariant: compounds have all four required companion fields
+    // (composed_of, generated_at, render_mode, body_level) plus an optional
+    // depth; atoms have none of them. Kind drives the dispatch.
+    match header.kind {
+        PromptElementKind::Atom => validate_atom(header, path),
+        PromptElementKind::Compound => validate_compound(header, path),
+    }
+}
+
+fn validate_atom(header: &PromptElementHeader, path: &Path) -> Result<()> {
+    // Per-field check: each compound-only field on an atom is its own error
+    // arm, so the message names the exact offending field.
+    let forbidden: &[(&'static str, bool)] = &[
+        ("composed_of", header.composed_of.is_some()),
+        ("generated_at", header.generated_at.is_some()),
+        ("render_mode", header.render_mode.is_some()),
+        ("body_level", header.body_level.is_some()),
+        ("depth", header.depth.is_some()),
+    ];
+    for (field, present) in forbidden {
+        if *present {
+            return Err(OovraError::AtomHasForbiddenField {
+                path: path.to_path_buf(),
+                id: header.id.clone(),
+                field,
+            });
         }
     }
+    Ok(())
+}
 
+fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
+    // composed_of must be present + non-empty; every entry must be a
+    // kebab-case id with a semver version.
+    let composed_of = header.composed_of.as_ref().ok_or_else(|| {
+        OovraError::CompoundMissingField { path: path.to_path_buf(), id: header.id.clone(), field: "composed_of" }
+    })?;
+    // generated_at must be present and RFC 3339; render_mode and body_level
+    // must be present; body_level >= 1; depth (if present) >= 1.
+    // ... (see src/element.rs for the full body of these helpers)
     Ok(())
 }
 ```
 
-The two-arm structure encodes a **joint invariant**: a compound has all five companion fields set (with a real recipe); an atom has none of them. Anything else is rejected.
+The two-arm structure encodes a **joint invariant**: a compound has all four required companion fields set (with a real recipe) plus an optional `depth`; an atom has none of them. Anything else is rejected. The dedicated `AtomHasForbiddenField` and `CompoundMissingField` error variants exist specifically so the message names the exact field at fault — "Atom 'foo' has forbidden field 'body_level'" is what an agent needs to self-correct; "validation failed" is not.
 
 > ★ **Insight — Why the joint invariant beats per-field optionality.** Without the `else` branch, an attacker (or a confused agent) could write a file with `kind = "atom"` but a `composed_of` array stuffed full of dangling references — claiming atom-ness while carrying compound machinery. Decompose would either misbehave or refuse, but only when called; in the meantime the file would sit in libraries with two contradictory descriptions of what it is. The rejection-on-mixed-fields rule makes that whole class of confusion impossible at parse time.
 
@@ -510,6 +533,80 @@ pub fn write(element: &PromptElement, path: &Path) -> Result<()> {
 **Validate before you write, not after.** Earlier this code only had the post-write `parse_file(path)` check — and it worked, but with a bad UX consequence: a bad input (e.g. an ID that wasn't kebab-case) would write the file *first*, then fail validation, leaving an unparseable orphan on disk. The fix is two-line: serialize, then `parse(&content, path)?` against the in-memory string before any `fs::write` happens. The post-write `parse_file` stays as a paranoia check against filesystem-layer corruption (BOM bytes, line-ending conversion, encoding) — but the user-facing validation never produces an orphan.
 
 > ★ **Insight — Discovered during live testing.** The orphan-file behavior didn't show up in any unit test because tests don't `ls` the filesystem afterwards — they assert on return values. It surfaced the moment a CLI user typed a bad ID and noticed the file was still there. The lesson: tests that only check return values miss whole categories of side-effect bugs. Add at least one test per write-path that asserts on the *resulting filesystem state*, not just the function's return.
+
+#### 1.7.5 — Transitional parse mode for v0.1 files
+
+The v0.2 parser rejects files lacking the `kind` field. But v0.1 files are everywhere — anyone with an existing library has a directory full of `order = N` frontmatters. Two paths exist for handling them:
+
+1. **`oovra migrate`** (Stage 5) — rewrites every file on disk in v0.2 schema. The recommended path for any library you control.
+2. **`--legacy` flag** — read-only acceptance of v0.1 files for ad-hoc operations during the transition window. Writes are still always in v0.2 format.
+
+Both rely on the same in-memory infrastructure: a separate `LegacyHeader` struct, a `looks_like_missing_kind` heuristic on the toml parse error, and an `into_v2()` converter.
+
+```rust
+#[derive(Debug, Deserialize)]
+pub struct LegacyHeader {
+    pub name: String,
+    pub order: u32,
+    pub id: String,
+    pub version: String,
+    #[serde(default)] pub meta: String,
+    #[serde(default)] pub generated_at: Option<String>,
+    #[serde(default)] pub render_mode: Option<String>,
+    #[serde(default)] pub body_level: Option<u32>,
+    #[serde(default)] pub composed_of: Option<Vec<InputRef>>,
+}
+
+impl LegacyHeader {
+    pub fn into_v2(self) -> Result<PromptElementHeader, String> {
+        let kind = match (self.order, self.composed_of.is_some()) {
+            (_, true)      => PromptElementKind::Compound,
+            (0, false)     => PromptElementKind::Atom,
+            (n, false)     => return Err(format!(
+                "legacy element '{}' has order = {} but no composed_of; \
+                 v0.1 already rejected this case, so it cannot be migrated.", self.id, n)),
+        };
+        let depth = self.body_level;  // v0.2 invariant: depth == body_level
+        Ok(PromptElementHeader {
+            name: self.name, kind, id: self.id, version: self.version, meta: self.meta,
+            generated_at: self.generated_at, render_mode: self.render_mode,
+            body_level: self.body_level, depth, composed_of: self.composed_of,
+        })
+    }
+}
+```
+
+The mapping is from SPEC §5.1: `(order=0, no recipe)` → atom; `(any order, has recipe)` → compound; `(order ≥ 1, no recipe)` is impossible — v0.1 rejected it too, so v0.2 refuses to synthesize a kind.
+
+`ParseOptions { legacy: bool }` carries the flag through the parser:
+
+```rust
+pub fn parse_with(content: &str, path: &Path, opts: ParseOptions) -> Result<PromptElement> {
+    let (fm_str, body) = split_frontmatter(content, path)?;
+    let header: PromptElementHeader = match toml::from_str(&fm_str) {
+        Ok(h) => h,
+        Err(v2_err) => {
+            if opts.legacy && looks_like_missing_kind(&v2_err) {
+                let legacy: LegacyHeader = toml::from_str(&fm_str)?;
+                legacy.into_v2()?
+            } else {
+                return Err(OovraError::InvalidToml { path: path.to_path_buf(), source: v2_err });
+            }
+        }
+    };
+    validate_header(&header, &body, path)?;
+    Ok(PromptElement { header, body, source_path: Some(path.to_path_buf()) })
+}
+
+fn looks_like_missing_kind(err: &toml::de::Error) -> bool {
+    let msg = err.to_string();
+    msg.contains("missing field `kind`") || msg.contains("missing field \"kind\"")
+}
+```
+
+The heuristic on the error message is what avoids needing a thread-local or a separate parser pipeline. It's small and stable: the toml crate's missing-field message is part of its public surface.
+
+> ★ **Insight — A separate struct, not an `Option<u32>` on the main header.** v0.1 and v0.2 schemas differ on what's required, what's forbidden, and (most importantly) what mapping rule turns one into the other. Putting `order` as an optional field on `PromptElementHeader` would mean every operator has to think about "what if both `kind` and `order` are present?" The two-struct design moves that question to a single `into_v2()` call at the parse boundary. Past that boundary, everything is pure v0.2.
 
 #### 1.8 — Write the library loader
 
@@ -992,49 +1089,77 @@ fn content_diff(a: &PromptElement, b: &PromptElement) -> ContentDiff {
 
 > ★ **Insight — Why LCS-based diff (`similar`) instead of word-level or character-level.** Prompt bodies are paragraph-shaped. Line-level diff matches the unit a human author edits in. Word-level diff over multi-line bodies produces visually noisy reports where a small edit looks like a wholesale rewrite. Match the diff granularity to the editing granularity.
 
-#### 4.3 — Structural diff (compounds)
+#### 4.3 — Structural diff (compounds) — sequence-aware
 
-This is where Compare earns its keep. The structural diff operates on the `composed_of` arrays:
+This is where Compare earns its keep. The structural diff operates on the `composed_of` arrays. In v0.2 the diff is **sequence-aware**: position changes are surfaced as a fourth axis (`moved`) alongside `added`, `removed`, and `version_changed`.
 
 ```rust
 fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDiff> {
-    let a_inputs = a.header.composed_of.as_ref().unwrap();
-    let b_inputs = b.header.composed_of.as_ref().unwrap();
+    let a_inputs = a.header.composed_of.as_ref().expect("compound has composed_of");
+    let b_inputs = b.header.composed_of.as_ref().expect("compound has composed_of");
 
-    let a_by_id: HashMap<&str, &str> = a_inputs.iter().map(|i| (i.id.as_str(), i.version.as_str())).collect();
-    let b_by_id: HashMap<&str, &str> = b_inputs.iter().map(|i| (i.id.as_str(), i.version.as_str())).collect();
+    // Index each side by id → (position, version). The HashMap gives O(1)
+    // lookup; carrying position alongside version is what makes the diff
+    // sequence-aware.
+    let a_by_id: HashMap<&str, (usize, &str)> = a_inputs.iter().enumerate()
+        .map(|(pos, i)| (i.id.as_str(), (pos, i.version.as_str()))).collect();
+    let b_by_id: HashMap<&str, (usize, &str)> = b_inputs.iter().enumerate()
+        .map(|(pos, i)| (i.id.as_str(), (pos, i.version.as_str()))).collect();
 
     let mut added = Vec::new();
     let mut removed = Vec::new();
     let mut version_changed = Vec::new();
+    let mut moved = Vec::new();
 
-    for input in b_inputs {
+    // Walk b: classify each b-input as added (id not in a), version_changed
+    // (id in a, version differs), and/or moved (id in a, position differs).
+    // version_changed and moved are NOT mutually exclusive — a single input
+    // can both have its pin bumped and shift position; both axes report it.
+    for (b_pos, input) in b_inputs.iter().enumerate() {
         match a_by_id.get(input.id.as_str()) {
-            Some(a_ver) if *a_ver != input.version.as_str() => {
-                version_changed.push(VersionChange { /* ... */ });
+            Some(&(a_pos, a_ver)) => {
+                if a_ver != input.version.as_str() {
+                    version_changed.push(VersionChange { /* ... */ });
+                }
+                if a_pos != b_pos {
+                    moved.push(Move {
+                        id: input.id.clone(),
+                        version: input.version.clone(),
+                        before_pos: a_pos,
+                        after_pos: b_pos,
+                    });
+                }
             }
-            None => added.push(input.clone()),
-            _ => {}
+            None => added.push(PositionedInput { position: b_pos, input: input.clone() }),
         }
     }
-    for input in a_inputs {
+    // Walk a: classify each a-input absent from b as removed.
+    for (a_pos, input) in a_inputs.iter().enumerate() {
         if !b_by_id.contains_key(input.id.as_str()) {
-            removed.push(input.clone());
+            removed.push(PositionedInput { position: a_pos, input: input.clone() });
         }
     }
 
-    Ok(StructuralDiff { added, removed, version_changed, /* ... */ })
+    let recipes_equal = added.is_empty() && removed.is_empty()
+        && version_changed.is_empty() && moved.is_empty();
+
+    Ok(StructuralDiff { added, removed, version_changed, moved, recipes_equal, /* ... */ })
 }
 ```
 
-Hash-by-id lookup in O(1) per input. Three categories:
-- **Added** in B, not in A by ID.
-- **Removed** in A, not in B by ID.
-- **Version-changed** — same ID in both, different version.
+Hash-by-id lookup in O(1) per input. Four categories:
+- **Added** — id present in B, absent in A. Position is B-side.
+- **Removed** — id present in A, absent in B. Position is A-side.
+- **Version-changed** — same id in both, different version.
+- **Moved** — same id and version, different position.
 
-This is the diff that makes "two compositions whose rendered bodies are wildly different" reveal themselves as "actually identical except for one input version bump." That's the core architectural payoff: **structural similarity through surface noise**.
+`recipes_equal` is true iff all four lists are empty.
 
-> ★ **Insight — Why this is a set-difference, not a sequence-diff.** We treat `composed_of` as a set keyed by ID, not a sequence. Reordering the inputs is not reported as a diff — Compare answers "what's different about the *recipe*," and sequence-of-inputs is rendering-only metadata. A future version might add a `--ordered` flag to detect reorders, but for now the set-based answer is the load-bearing one.
+This is the diff that makes "two compositions whose rendered bodies are wildly different" reveal themselves as "actually identical except for one input version bump and a reorder." That's the core architectural payoff: **structural similarity through surface noise**.
+
+> ★ **Insight — Why v0.2 made the diff sequence-aware.** v0.1 treated `composed_of` as a set keyed by ID — reordering inputs wasn't reported as a diff. But composing `[role, safety, tone]` then `[tone, safety, role]` produces two files whose *rendered prompts* differ (the model sees different ordering), so the recipes are not semantically equal. The set-based answer was misleading. v0.2 carries position alongside version in the hash, surfaces position differences as a separate `moved` axis, and explicitly documents that `version_changed` and `moved` can fire on the *same input* — there is no false dichotomy between "changed version" and "changed position." See [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) for the four-axes-all-firing scenario verified end-to-end.
+
+> ★ **Insight — Duplicate-id limitation.** The HashMap key is the id; if a single `composed_of` contains the same id twice, the second occurrence wins in the map, and moves involving duplicate-id inputs are not detected. Duplicate ids are rare (and arguably a smell) — a full LCS-based diff that handles duplicates is on the v0.3 roadmap. Documented at the top of `src/diff.rs`.
 
 #### 4.4 — Wire Compare to the CLI
 
@@ -1054,28 +1179,118 @@ fn run_compare(args: CompareArgs) -> anyhow::Result<()> {
     match report {
         DiffReport::Content(c) => { /* unified diff with red/green colors */ }
         DiffReport::Structural(s) => {
+            for pi in &s.added {
+                println!("    + [{}] {} @ {}", pi.position, pi.input.id, pi.input.version);
+            }
+            for pi in &s.removed {
+                println!("    - [{}] {} @ {}", pi.position, pi.input.id, pi.input.version);
+            }
             for v in &s.version_changed {
                 println!("    ~ {} : {} -> {}", v.id, v.before_version, v.after_version);
             }
-            // ... added / removed
+            for m in &s.moved {
+                println!("    ↔ {} @ {} : pos {} -> pos {}",
+                         m.id, m.version, m.before_pos, m.after_pos);
+            }
         }
     }
     Ok(())
 }
 ```
 
-Use `owo-colors` for the green/red/yellow coding. `serde_json::to_string_pretty(&report)` "just works" because all the diff structs derive `Serialize`.
+Use `owo-colors` for the green/red/yellow/blue coding (added is green, removed is red, version_changed is yellow, moved is blue with the `↔` glyph). `serde_json::to_string_pretty(&report)` "just works" because all the diff structs derive `Serialize`.
 
-#### 4.5 — Test the end-to-end versioning case
+#### 4.5 — Test every diff axis end-to-end
 
-The integration test `compare_structural_diff_detects_version_change` does the full loop:
+The integration suite (`tests/end_to_end.rs`) exercises each diff axis in isolation, then together. Three tests are load-bearing:
 
-1. Compose two atom inputs into a compound (`body_level = 1`).
-2. Stage a modified library where one input's version is bumped.
-3. Compose the *same* input IDs again against the modified library.
-4. `compare(v1, v2)` must report exactly one version change and no add/remove.
+- **`compare_structural_diff_detects_version_change`** — compose `v1`, bump a library version, compose `v2` with the same ID list, expect exactly one entry in `version_changed`. No add/remove/move.
+- **`compare_detects_reorder`** — compose `v1 = [a, b, c]`, compose `v2 = [c, a, b]` against the unchanged library, expect three entries in `moved` and `recipes_equal = false`. (v0.1 would have reported `recipes_equal = true` here — this is the regression test for the sequence-awareness fix.)
+- **`compare_distinguishes_move_from_add_remove`** — compose `v1 = [a, b, c]`, compose `v2 = [a, b, d]` where `d` is a different atom, expect `c` on `removed`, `d` on `added`, and `a, b` not on `moved`. This proves `moved` doesn't trigger spuriously when the recipes don't actually overlap at those positions.
 
-If this test passes, your structural diff is doing what it claims to do. The two composed bodies will have very different timestamps and rendered text, but `compare` cuts through to the one structural change.
+A fourth test verifies the non-exclusivity case:
+
+- **`compare_reports_pure_version_change_not_as_move`** — bumping one input's version with no position change should fire `version_changed` only, not `moved`.
+
+If these four pass, your structural diff is doing what it claims. The two composed bodies will have very different timestamps and rendered text, but `compare` cuts through to the structural changes.
+
+---
+
+### Stage 5 — Migrate
+
+The fifth operator is for the schema transition itself. `oovra migrate <library-dir>` walks a directory recursively, parses each `.md` file in legacy mode (accepting both v0.1 and v0.2 shapes), and rewrites every Oovra file in v0.2 schema in place. Idempotent on already-v0.2 files — re-serialization may canonicalize field order but doesn't change content. Non-Oovra `.md` files (no `+++` opener) are skipped.
+
+#### 5.1 — The shape of migration
+
+The function returns a summary so the CLI can print per-file outcomes:
+
+```rust
+#[derive(Debug, Default)]
+pub struct MigrationSummary {
+    pub migrated: Vec<PathBuf>,
+    pub skipped: Vec<(PathBuf, &'static str)>,   // reason tag
+    pub failed:  Vec<(PathBuf, OovraError)>,
+}
+
+pub fn migrate_library(root: &Path) -> Result<MigrationSummary> {
+    // ... walk root, parse each .md in legacy mode, rewrite in v0.2 ...
+}
+```
+
+The CLI surface is one positional arg:
+
+```rust
+#[derive(clap::Args, Debug)]
+struct MigrateArgs {
+    /// Library directory to migrate in place. Recursive. Run in a clean
+    /// Git working directory so the diff is auditable.
+    library: PathBuf,
+}
+```
+
+#### 5.2 — Recursion into compound bodies (the load-bearing bit)
+
+The naive migrate is one line per file: read it in legacy mode, write it out in v0.2 mode. That works for atoms. But compounds carry their full sub-tree as wrapped sub-files inside the body, and those embedded sub-files have their *own* v0.1 frontmatters. A pure outer-frontmatter rewrite leaves the embedded sub-elements still in v0.1 form — they will then fail v0.2-strict parsing when `decompose` runs on the migrated file.
+
+The fix: recursively decompose the body in legacy mode, migrate each sub-element, re-render the body from the migrated children, and only *then* re-serialize the outer file.
+
+```rust
+fn rewrite_with_body_migration(element: &PromptElement) -> Result<PromptElement> {
+    if element.header.is_atom() { return Ok(element.clone()); }
+    let body_level = element.header.body_level
+        .expect("compound validation guarantees body_level");
+    let sub_elements = decompose_with(element, ParseOptions { legacy: true })?;
+    let mut migrated_chunks: Vec<String> = Vec::with_capacity(sub_elements.len());
+    for sub in sub_elements {
+        let migrated_sub = rewrite_with_body_migration(&sub)?;
+        migrated_chunks.push(serialize(&migrated_sub)?);
+    }
+    let new_body = render_body(body_level, &migrated_chunks);
+    Ok(PromptElement::new(element.header.clone(), new_body))
+}
+```
+
+This requires a `decompose_with(element, opts)` variant that threads `ParseOptions` through to embedded sub-element parsing — added to `src/decompose.rs` alongside the existing `decompose` (which is now a thin wrapper passing default options). The outer header's `body_level` is preserved from v0.1 (the integer didn't change semantically), so the rendered body lines up exactly.
+
+> ★ **Insight — A bug found by integration testing, not unit testing.** The migrate function's first pass only rewrote outer frontmatter. Unit tests on atoms and shallow compounds passed. The bug surfaced the moment a deep compound was migrated and then `decompose` was run on the result — `decompose` choked on an embedded sub-element with no `kind` field. Lesson: when a migration tool walks a recursive data structure, the test fixtures need to *include* the recursive case, not just the flat case. The regression test `migrate_recursively_rewrites_embedded_frontmatter` now covers this directly.
+
+#### 5.3 — Idempotency and atomicity
+
+Two properties worth verifying explicitly:
+
+- **Idempotent on v0.2 files.** Running `migrate` against an already-migrated directory should be a no-op (modulo possible canonicalization of TOML field order). The integration test `migrate_is_idempotent_on_v0_2_files` confirms this.
+- **Atomic per file via in-memory validation.** The same `write` function used by Create and Compose validates the serialized form *in memory* before any disk write — so a file whose migration would produce an invalid v0.2 result is left untouched on disk and reported as `failed`. No partial writes, no torn files.
+
+#### 5.4 — Why `--legacy` exists alongside `migrate`
+
+`--legacy` is the *read-only* counterpart to `migrate`: it lets users run `decompose`, `compare`, or `compose --text` against v0.1 files without committing to a one-way rewrite. Writes are always in v0.2 format regardless of the flag, so a user with mixed libraries can read v0.1 files while gradually migrating them.
+
+The expected lifecycle:
+
+1. v0.2 ships; users discover their old files no longer parse.
+2. They run `oovra migrate ./elements` in a clean git working tree, audit the diff, commit.
+3. The `--legacy` flag remains available for one minor version (v0.2.x) for stragglers.
+4. v0.3 removes `--legacy` and `LegacyHeader`. Users who haven't migrated by then run `oovra migrate` first.
 
 ---
 
@@ -1092,45 +1307,66 @@ You now have a working build. Take a system prompt you actually use — for a co
 ```
 oovra/
 ├── Cargo.toml
+├── CHANGELOG.md
+├── LICENSE-MIT
+├── LICENSE-APACHE
 ├── README.md
 ├── SCHEMA.md
 ├── Documentation/
 │   ├── README.md
-│   ├── reference/         # feature-by-feature reference docs
-│   ├── demos/             # end-to-end demonstrations
-│   ├── build-guide.md     # this file
-│   └── v0.1/              # version-specific planning artifacts
-│       └── version-reports/  # v0.2 scoping, server feasibility, v0.1 efficacy
+│   ├── reference/                         # feature-by-feature reference docs
+│   │   ├── README.md
+│   │   ├── schema.md
+│   │   ├── kind-and-delimiters.md
+│   │   ├── command-create.md
+│   │   ├── command-compose.md
+│   │   ├── command-decompose.md
+│   │   ├── command-compare.md
+│   │   ├── errors.md
+│   │   └── build-guide.md                 # this file
+│   ├── demos/                             # end-to-end demonstrations, split by version
+│   │   ├── README.md
+│   │   ├── v0.1/                          # 5 demos captured against v0.1, migrated in place
+│   │   └── v0.2/                          # v0.2-era demos (operator gamut, sequence-aware compare)
+│   └── version-reports/
+│       └── v0.1/                          # v0.1 planning artifacts (SPEC-v0.2.md, efficacy, ceiling, scoping)
 ├── src/
-│   ├── lib.rs             # public re-exports
-│   ├── main.rs            # CLI entry point
-│   ├── error.rs           # OovraError enum
-│   ├── header.rs          # PromptElementHeader, InputRef, validators
-│   ├── element.rs         # parser, splitter, serializer, body delimiters
-│   ├── library.rs         # Library loader
-│   ├── render.rs          # Compose, compute_body_level, compute_depth, render_body, render_text
-│   ├── decompose.rs       # decompose, decompose_full, report
-│   ├── diff.rs            # Compare with kind-aware dispatch
-│   └── create.rs          # scaffold, label
-├── elements/              # 5 sample atoms
+│   ├── lib.rs                             # public re-exports + clippy allow
+│   ├── main.rs                            # CLI entry point (clap-derive)
+│   ├── error.rs                           # OovraError enum
+│   ├── header.rs                          # PromptElementHeader, PromptElementKind, LegacyHeader, InputRef, validators
+│   ├── element.rs                         # parser, splitter, serializer, body delimiters, ParseOptions
+│   ├── library.rs                         # Library loader (legacy-aware)
+│   ├── render.rs                          # Compose, compute_body_level, compute_depth, render_body, render_text
+│   ├── decompose.rs                       # decompose, decompose_with, decompose_full, report
+│   ├── diff.rs                            # Compare with kind-aware, sequence-aware dispatch
+│   ├── create.rs                          # scaffold, label (both always produce atoms)
+│   └── migrate.rs                         # migrate_library + recursive frontmatter rewrite
+├── elements/                              # 5 sample atoms
 │   ├── role-declaration.md
 │   ├── refusal-policy-strict.md
 │   ├── output-format-markdown.md
 │   ├── tone-direct.md
 │   └── examples-block.md
 └── tests/
-    └── end_to_end.rs      # 11 integration tests covering the full pipeline
+    └── end_to_end.rs                      # 19 integration tests covering the full pipeline
 ```
 
-Total: roughly 2,000 lines of Rust + 450 lines of integration test + 5 small Markdown sample elements. The codebase fits in one head. (Exact counts as of this snapshot: 2,062 src lines, 466 test lines.)
+Total: roughly 2,600 lines of Rust + 860 lines of integration test + 5 sample atoms + the full Documentation tree. The codebase still fits in one head. (Exact counts as of this snapshot: 2,578 src lines, 862 test lines, 11 src modules.)
 
 ## Appendix B — Test Strategy
 
-**Unit tests** (`#[cfg(test)] mod tests { ... }` inside each source file): test pure functions. `compute_body_level` and `compute_depth` against tabulated input cases. `is_kebab_case` against valid and invalid IDs. `body_delimiter_open` against expected outputs at multiple levels. `parse` round-tripping a minimal file. These tests run in milliseconds and you should run them on every save.
+**Unit tests** (`#[cfg(test)] mod tests { ... }` inside each source file): test pure functions. `compute_body_level` and `compute_depth` against tabulated input cases. `is_kebab_case`, `is_valid_semver`, `is_valid_rfc3339` against valid and invalid inputs. `body_delimiter_open` against expected outputs at multiple levels. `parse` round-tripping a minimal file. The atom-validator and compound-validator each get a battery of "what if every individual forbidden field is set" / "what if every individual required field is missing" tests. Legacy-loader tests verify the v0.1→v0.2 mapping for both atoms and compounds (and the rejected `order ≥ 1 without composed_of` case). These tests run in milliseconds and you should run them on every save. v0.2 ships 27 unit tests; if any fails, fix it before touching the integration suite.
 
-**Integration tests** (`tests/end_to_end.rs`): test the full pipeline. Compose 3 atoms into a `body_level = 1` compound; assert the body contains all expected input IDs. Compose 2 `body_level = 1` compounds into a `body_level = 2` compound; assert both `~~>>` (level 1) AND `~~~>>` (level 2) appear in the body — this is the strict-escalation rule under test. `decompose_full` a `body_level = 2` element and assert the folder tree has the exact expected structure with full metadata-preservation on every leaf. The mixed-input regression test (`mixed_order_compose_does_not_collide_with_inner_delimiters`) specifically exercises a compound whose inputs include both a compound and several atoms — the case that exposed the v0.1 body-level conflation bug.
+**Integration tests** (`tests/end_to_end.rs`): test the full pipeline against real on-disk fixtures. Compose 3 atoms into a `body_level = 1` compound; assert the body contains all expected input IDs. Compose 2 `body_level = 1` compounds into a `body_level = 2` compound; assert both `~~>>` (level 1) AND `~~~>>` (level 2) appear in the body — the strict-escalation rule under test. `decompose_full` a `body_level = 2` element and assert the folder tree has the exact expected structure with full metadata-preservation on every leaf.
 
-The integration tests are the load-bearing proof that the architecture works. If they pass, the system does what it claims.
+Three groups of integration tests carry particular regression weight:
+
+- **`mixed_kind_compose_does_not_collide_with_inner_delimiters`** — exercises a compound whose inputs include both a compound and several atoms; the case that exposed the v0.1 body-level conflation bug.
+- **Sequence-aware compare**: `compare_detects_reorder`, `compare_distinguishes_move_from_add_remove`, `compare_reports_pure_version_change_not_as_move`. Each exercises one corner of the four-axis diff added in v0.2.
+- **Migrate**: `migrate_rewrites_library_in_place`, `migrate_preserves_lossless_roundtrip`, `migrate_recursively_rewrites_embedded_frontmatter`, `migrate_is_idempotent_on_v0_2_files`. The third specifically catches the recursive-frontmatter bug that was found during the v0.2 build (Appendix B.5 §5).
+
+The integration suite is 19 tests; combined with the unit suite, v0.2 ships 46 passing tests. If they pass, the system does what it claims.
 
 ## Appendix B.5 — Bugs Found During the Build
 
@@ -1160,6 +1396,18 @@ This is the list of bugs that were caught and fixed during construction. They're
 *Fix:* validate the in-memory serialized form via `parse(&content, path)?` *before* any `fs::write` happens. Disk is only touched if the in-memory form already parses.
 *Lesson:* tests that only assert on return values miss side-effect bugs. The fix here required adding a test that does `read_dir` on the target directory after a failed scaffold to verify zero files exist. Side effects deserve side-effect-aware assertions.
 
+**5. Migrate only rewrote outer frontmatter; embedded sub-elements stayed in v0.1 (found during v0.2 work).**
+*Symptom:* `oovra migrate ./elements` reported success, but a follow-up `oovra decompose` on any migrated *deep* compound failed with `missing field 'kind'` pointing at an embedded sub-element's frontmatter.
+*Root cause:* the first-pass migrate function read each file via `parse_file_with(legacy=true)`, then re-serialized only the outer header. The compound's body still contained v0.1 sub-files verbatim — the legacy loader had accepted them on read but the rewrite never touched them.
+*Fix:* a `decompose_with(element, opts)` variant that threads `ParseOptions` into the embedded parsing step, plus a recursive `rewrite_with_body_migration` that legacy-decomposes the body, migrates each sub-element, and re-renders the body from migrated children before re-serializing the outer file.
+*Lesson:* when a transformation walks a recursive structure, the test fixtures must include the recursive case explicitly. Shallow fixtures and unit-tests-on-atoms passed; the bug only surfaced when a `body_level = 2` compound was migrated and immediately decomposed. Regression test: `migrate_recursively_rewrites_embedded_frontmatter`.
+
+**6. Sequence-blind structural diff reported reorders as equal (v0.1, fixed in v0.2).**
+*Symptom:* composing `[role, safety, tone]` then `[tone, safety, role]` produced two compound files whose rendered prompts differed (the LLM would see different order) but `oovra compare` reported `recipes_equal: true`.
+*Root cause:* v0.1's structural diff hashed by ID and reported only `added`/`removed`/`version_changed` — position was discarded.
+*Fix:* the v0.2 diff carries `(position, version)` in the by-ID map and adds a fourth axis `moved` for same-id-same-version-different-position. `version_changed` and `moved` are explicitly non-mutually-exclusive: one input can fire on both.
+*Lesson:* set-based abstractions over inherently sequential data are a class of silent semantic loss. When the rendering depends on order, the diff must as well — even if it makes the type and the report more complex.
+
 ## Appendix C — The Sheet Mapping
 
 Your Google Sheet's four operators map cleanly:
@@ -1169,7 +1417,7 @@ Your Google Sheet's four operators map cleanly:
 | JOIN | A1:G1 → H1 (delimited concat) | Compose | `render_body` wraps each input chunk in delimiters and joins |
 | SPLIT | B3 → C3:H3 (split on delimiter) | Decompose | walk the body, split at level-N delimiters, parse each chunk as a complete file |
 | UNIQUE | B5:C8 → D5 (deduplicate across array) | Library audit (deferred) | hash all `composed_of` IDs across compositions, find rare/common |
-| FORWARD-DIFF | B10, C10 → D10 (set difference) | Compare | hash-by-id over `composed_of`, compute added/removed/version-changed |
+| FORWARD-DIFF | B10, C10 → D10 (sequence-aware difference) | Compare | hash-by-id over `composed_of` carrying position, compute added/removed/version-changed/moved |
 
 The structural difference between the Sheet and Oovra: the Sheet operates on string values (and derives types from formulas); Oovra operates on **typed parsed structures** (and derives string outputs from rendering). The format is doing static-typing work that the Sheet has to do dynamically.
 

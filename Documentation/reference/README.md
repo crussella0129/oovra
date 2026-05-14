@@ -2,7 +2,7 @@
 
 The complete feature reference for Oovra v0.2. Each document is a stand-alone reference for one aspect of the system, with explicit specifications, every flag, every constraint, every error variant, and worked examples.
 
-If you're new to Oovra, start at the parent [Documentation/README.md](../README.md) and walk through the [demos](../demos/) first — they give you a concrete tour. This reference is for when you need to look something up: "what does this flag do," "what error can fire here," "what's the formula for `body_level`."
+If you're new to Oovra, start at the parent [Documentation/README.md](../README.md) and walk through the [demos](../demos/) first — they give you a concrete tour. The [v0.1 demos](../demos/v0.1/) cover architectural properties (lossless round-trip, prose rendering, deep flattening, structural diff, mixed-order regression); the [v0.2 demos](../demos/v0.2/) cover the new operator gamut and sequence-aware compare. This reference is for when you need to look something up: "what does this flag do," "what error can fire here," "what's the formula for `body_level`."
 
 ## Reading order
 
@@ -45,7 +45,7 @@ This reference is for **Oovra v0.2**. The breaking change from v0.1 was the sche
 
 ## See also
 
-- [../demos/](../demos/) — end-to-end demonstrations of each property in action
+- [../demos/](../demos/) — end-to-end demonstrations of each property in action (split by version: `v0.1/`, `v0.2/`)
 - [build-guide.md](./build-guide.md) — the from-first-principles construction guide for builders reimplementing this from scratch
 - [../../CHANGELOG.md](../../CHANGELOG.md) — version history
 - [../version-reports/v0.1/SPEC-v0.2.md](../version-reports/v0.1/SPEC-v0.2.md) — the v0.2 migration specification

@@ -211,7 +211,7 @@ This is why the parser is O(file size) and unambiguous regardless of composition
 
 ## The mixed-kind regression
 
-A historical note: in v0.1, the on-disk delimiter level was derived from a different formula than `body_level` is computed by today. Composing one compound with several atoms used to produce a body where the outer delimiters could collide with the inner compound's delimiters. The fix preserved in `compute_body_level` is to *always* compute `max(input.body_level) + 1`, regardless of how many inputs are at the max. See [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) for the worked demonstration and the in-tree regression test (`mixed_kind_compose_does_not_collide_with_inner_delimiters`).
+A historical note: in v0.1, the on-disk delimiter level was derived from a different formula than `body_level` is computed by today. Composing one compound with several atoms used to produce a body where the outer delimiters could collide with the inner compound's delimiters. The fix preserved in `compute_body_level` is to *always* compute `max(input.body_level) + 1`, regardless of how many inputs are at the max. See [demos/v0.1/05-mixed-order-regression](../demos/v0.1/05-mixed-order-regression/) for the worked demonstration and the in-tree regression test (`mixed_kind_compose_does_not_collide_with_inner_delimiters`).
 
 ---
 
@@ -220,5 +220,5 @@ A historical note: in v0.1, the on-disk delimiter level was derived from a diffe
 - [schema.md](./schema.md) — where `body_level` and `depth` live in the frontmatter
 - [command-compose.md](./command-compose.md) — how Compose computes them at composition time
 - [command-decompose.md](./command-decompose.md) — how Decompose uses `body_level` to split bodies
-- [demos/05-mixed-order-regression](../demos/05-mixed-order-regression/) — the historical collision case, now a regression test
+- [demos/v0.1/05-mixed-order-regression](../demos/v0.1/05-mixed-order-regression/) — the historical collision case, now a regression test
 - [v0.2 SPEC](../version-reports/v0.1/SPEC-v0.2.md) — the migration rationale for removing `order`

@@ -198,4 +198,5 @@ Beyond the dispatch refusal listed above:
 - [kind-and-delimiters.md](./kind-and-delimiters.md) — `body_level` and `depth` semantics
 - [command-compose.md](./command-compose.md) — produces the files Compare diffs
 - [errors.md](./errors.md) — refusal error variants in detail
-- [demos/04-structural-diff](../demos/04-structural-diff/) — end-to-end demonstration of structural diff cutting through noise
+- [demos/v0.1/04-structural-diff](../demos/v0.1/04-structural-diff/) — end-to-end demonstration of structural diff cutting through noise
+- [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) — all four diff axes (added, removed, version_changed, moved) firing simultaneously, including the non-mutually-exclusive case

@@ -290,7 +290,7 @@ The migration is recursive into compound bodies (embedded frontmatters are rewri
 - **One struct, two kinds** — `PromptElement` (the umbrella) plus a `kind` discriminator means one parser, one validator, one set of error messages. Operators dispatch on `is_atom()` / `is_compound()` rather than enum-matching the whole struct shape.
 - **`kind` not `order`** — the v0.1 numeric `order` field was path-dependent (the same atoms composed via different bracketings produced different `order` values) and carried no information any operator consumed. `kind` is a property of the artifact itself, not of how it was built.
 - **`depth` and `body_level` coexist** — `body_level` is what the body parser scans for (tilde count); `depth` is a human-readable equivalent that doesn't require knowing the parser's delimiter scheme. They are numerically identical for every valid compound.
-- **Compound bodies are self-describing** — embedding full sub-files (not just IDs) means a compound alone is sufficient to reconstruct every leaf. No library required. See [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) for the demonstration.
+- **Compound bodies are self-describing** — embedding full sub-files (not just IDs) means a compound alone is sufficient to reconstruct every leaf. No library required. See [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) for the demonstration.
 
 ---
 
@@ -300,5 +300,6 @@ The migration is recursive into compound bodies (embedded frontmatters are rewri
 - [command-create.md](./command-create.md) — how to produce atoms
 - [command-compose.md](./command-compose.md) — how to produce compounds (and the structure of what's produced)
 - [errors.md](./errors.md) — every validation error with example triggers
-- [demos/01-lossless-roundtrip](../demos/01-lossless-roundtrip/) — end-to-end proof that the body-as-source-of-truth design holds
+- [demos/v0.1/01-lossless-roundtrip](../demos/v0.1/01-lossless-roundtrip/) — end-to-end proof that the body-as-source-of-truth design holds
+- [demos/v0.2/01-operator-gamut](../demos/v0.2/01-operator-gamut/) — full Create→Compose→Decompose→Compare run with the new sequence-aware diff axes
 - [v0.2 SPEC](../version-reports/v0.1/SPEC-v0.2.md) — the migration specification
