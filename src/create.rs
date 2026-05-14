@@ -131,7 +131,11 @@ fn peel_existing_frontmatter(content: &str) -> Option<String> {
         return None;
     }
     // Skip exactly one blank line after the closing delimiter.
-    let start = if body_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
+    let start = if body_lines
+        .first()
+        .map(|l| l.trim().is_empty())
+        .unwrap_or(false)
+    {
         1
     } else {
         0

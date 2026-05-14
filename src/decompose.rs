@@ -45,12 +45,13 @@ pub fn decompose_with(element: &PromptElement, opts: ParseOptions) -> Result<Vec
         });
     }
 
-    let body_level = element.header.body_level.ok_or_else(|| {
-        OovraError::MissingField {
+    let body_level = element
+        .header
+        .body_level
+        .ok_or_else(|| OovraError::MissingField {
             path: std::path::PathBuf::from(format!("<{}:embedded>", element.header.id)),
             field: "body_level",
-        }
-    })?;
+        })?;
 
     let open = body_delimiter_open(body_level);
     let close = body_delimiter_close(body_level);
@@ -65,9 +66,7 @@ pub fn decompose_with(element: &PromptElement, opts: ParseOptions) -> Result<Vec
                 return Err(OovraError::BodyParse {
                     id: element.header.id.clone(),
                     body_level,
-                    reason: format!(
-                        "encountered '{open}' while still inside an open chunk"
-                    ),
+                    reason: format!("encountered '{open}' while still inside an open chunk"),
                 });
             }
             current = Some(Vec::new());
@@ -78,9 +77,7 @@ pub fn decompose_with(element: &PromptElement, opts: ParseOptions) -> Result<Vec
                     return Err(OovraError::BodyParse {
                         id: element.header.id.clone(),
                         body_level,
-                        reason: format!(
-                            "encountered '{close}' without a matching '{open}'"
-                        ),
+                        reason: format!("encountered '{close}' without a matching '{open}'"),
                     });
                 }
             }

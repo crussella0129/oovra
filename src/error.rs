@@ -30,7 +30,9 @@ pub enum OovraError {
     #[error("Empty file: {0}")]
     EmptyFile(PathBuf),
 
-    #[error("Missing opening '+++' delimiter on line 1 of {path}. Expected '+++', got '{actual}'.")]
+    #[error(
+        "Missing opening '+++' delimiter on line 1 of {path}. Expected '+++', got '{actual}'."
+    )]
     MissingOpenDelimiter { path: PathBuf, actual: String },
 
     #[error("Missing closing '+++' delimiter in {0}. Frontmatter must be terminated by '+++' on its own line.")]
@@ -81,7 +83,6 @@ pub enum OovraError {
     // Removed in v0.2: OrderRequiresField, HandAuthoredHigherOrder.
     // Replaced by MissingField (above) plus the kind-aware validator in
     // src/element.rs.
-
     #[error("Duplicate ID '{id}' in library: '{first}' and '{second}'")]
     DuplicateId {
         id: String,
@@ -101,8 +102,9 @@ pub enum OovraError {
 
     // Removed in v0.2: OrderMismatch. Order is gone; kind-mismatch is the
     // remaining axis of disagreement, reported via KindMismatch below.
-
-    #[error("Cannot compare an atom with a compound: '{a_id}' is an {a_kind}, '{b_id}' is a {b_kind}.")]
+    #[error(
+        "Cannot compare an atom with a compound: '{a_id}' is an {a_kind}, '{b_id}' is a {b_kind}."
+    )]
     KindMismatch {
         a_id: String,
         a_kind: &'static str,
@@ -116,7 +118,9 @@ pub enum OovraError {
     #[error("File {0} already has an Oovra header. Use --force to overwrite.")]
     AlreadyLabeled(PathBuf),
 
-    #[error("Cannot decompose atom '{id}'. Atoms have no recipe. Only compounds can be decomposed.")]
+    #[error(
+        "Cannot decompose atom '{id}'. Atoms have no recipe. Only compounds can be decomposed."
+    )]
     CannotDecomposeAtom { id: String },
 
     #[error("Body of compound '{id}' at body_level {body_level} could not be split into the expected sub-element chunks: {reason}")]

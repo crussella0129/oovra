@@ -157,8 +157,16 @@ fn track_field(out: &mut Vec<FieldChange>, name: &str, before: &str, after: &str
 fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDiff> {
     // A valid Compound has composed_of by definition; the validator ensures
     // this before `compare` is reachable.
-    let a_inputs = a.header.composed_of.as_ref().expect("compound has composed_of");
-    let b_inputs = b.header.composed_of.as_ref().expect("compound has composed_of");
+    let a_inputs = a
+        .header
+        .composed_of
+        .as_ref()
+        .expect("compound has composed_of");
+    let b_inputs = b
+        .header
+        .composed_of
+        .as_ref()
+        .expect("compound has composed_of");
 
     // Index each side by id → (position, version). Duplicate ids within a
     // single composed_of are rare but possible; the second occurrence wins,
@@ -220,10 +228,8 @@ fn structural_diff(a: &PromptElement, b: &PromptElement) -> Result<StructuralDif
         }
     }
 
-    let recipes_equal = added.is_empty()
-        && removed.is_empty()
-        && version_changed.is_empty()
-        && moved.is_empty();
+    let recipes_equal =
+        added.is_empty() && removed.is_empty() && version_changed.is_empty() && moved.is_empty();
 
     Ok(StructuralDiff {
         a_id: a.header.id.clone(),

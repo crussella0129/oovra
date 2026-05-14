@@ -25,14 +25,21 @@ fn create_with_invalid_id_does_not_leave_orphan_file() {
     let tmp = tempdir_for_test("orphan-check");
     let result = scaffold(ScaffoldArgs {
         library_dir: tmp.clone(),
-        id: "BadID".into(),  // not kebab-case
+        id: "BadID".into(), // not kebab-case
         name: None,
         version: "1.0.0".into(),
         meta: String::new(),
     });
     assert!(result.is_err(), "expected scaffold to reject 'BadID'");
-    let entries: Vec<_> = std::fs::read_dir(&tmp).unwrap().filter_map(|e| e.ok()).collect();
-    assert!(entries.is_empty(), "expected no files written, found {:?}", entries.iter().map(|e| e.path()).collect::<Vec<_>>());
+    let entries: Vec<_> = std::fs::read_dir(&tmp)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert!(
+        entries.is_empty(),
+        "expected no files written, found {:?}",
+        entries.iter().map(|e| e.path()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -45,7 +52,11 @@ fn parse_serialize_round_trip_is_idempotent() {
         let s1 = oovra::element::serialize(element).unwrap();
         let parsed = oovra::element::parse(&s1, std::path::Path::new("<test>")).unwrap();
         let s2 = oovra::element::serialize(&parsed).unwrap();
-        assert_eq!(s1, s2, "non-idempotent round-trip for '{}'", element.header.id);
+        assert_eq!(
+            s1, s2,
+            "non-idempotent round-trip for '{}'",
+            element.header.id
+        );
     }
 }
 
@@ -81,7 +92,10 @@ fn compose_round_trip_preserves_recipe_and_decomposes_lossless() {
     let recovered = decompose(&reparsed).unwrap();
     for original_id in &["role-declaration", "refusal-policy-strict", "tone-direct"] {
         let original = library.get(original_id).unwrap();
-        let rec = recovered.iter().find(|e| e.header.id == *original_id).unwrap();
+        let rec = recovered
+            .iter()
+            .find(|e| e.header.id == *original_id)
+            .unwrap();
         assert_eq!(rec.body, original.body, "body drift for {original_id}");
         assert_eq!(rec.header.name, original.header.name);
         assert_eq!(rec.header.version, original.header.version);
@@ -119,19 +133,21 @@ fn compose_three_atoms_into_one_compound() {
         output_meta: "Three-element strict coding-agent prompt".into(),
     };
     let composed = compose(req).unwrap();
-    assert_eq!(composed.header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(
+        composed.header.kind,
+        oovra::header::PromptElementKind::Compound
+    );
     assert_eq!(composed.header.body_level, Some(1));
     assert_eq!(
         composed.header.composed_of.as_ref().map(|v| v.len()),
         Some(3)
     );
     // Each input's content should appear in the body.
-    for id in &[
-        "role-declaration",
-        "refusal-policy-strict",
-        "tone-direct",
-    ] {
-        assert!(composed.body.contains(id), "expected {id} to appear in body");
+    for id in &["role-declaration", "refusal-policy-strict", "tone-direct"] {
+        assert!(
+            composed.body.contains(id),
+            "expected {id} to appear in body"
+        );
     }
     // Body should contain the level-1 delimiters.
     assert!(composed.body.contains("~~>>"));
@@ -184,10 +200,7 @@ fn compose_two_compounds_into_one_deeper_compound() {
     let staged_lib = Library::load(&tmp).unwrap();
     let deep = compose(ComposeRequest {
         library: &staged_lib,
-        inputs: vec![
-            ("subprompt-a".into(), None),
-            ("subprompt-b".into(), None),
-        ],
+        inputs: vec![("subprompt-a".into(), None), ("subprompt-b".into(), None)],
         output_id: "two-stage-prompt".into(),
         output_name: "Two-Stage Prompt".into(),
         output_version: "1.0.0".into(),
@@ -277,10 +290,7 @@ fn decompose_full_writes_folder_tree_for_deep_compound() {
     let staged_lib = Library::load(&staging).unwrap();
     let deep = compose(ComposeRequest {
         library: &staged_lib,
-        inputs: vec![
-            ("subprompt-a".into(), None),
-            ("subprompt-b".into(), None),
-        ],
+        inputs: vec![("subprompt-a".into(), None), ("subprompt-b".into(), None)],
         output_id: "full-test".into(),
         output_name: "Full Test".into(),
         output_version: "1.0.0".into(),
@@ -290,7 +300,11 @@ fn decompose_full_writes_folder_tree_for_deep_compound() {
 
     let out_dir = tmp.join("out");
     let element_root = decompose_full(&deep, &out_dir).unwrap();
-    assert!(element_root.is_dir(), "{} should be a directory", element_root.display());
+    assert!(
+        element_root.is_dir(),
+        "{} should be a directory",
+        element_root.display()
+    );
 
     // Expected structure:
     //   out/full-test/
@@ -307,11 +321,17 @@ fn decompose_full_writes_folder_tree_for_deep_compound() {
     assert!(element_root.join("full-test.md").is_file());
     assert!(element_root.join("subprompt-a").is_dir());
     assert!(element_root.join("subprompt-a/subprompt-a.md").is_file());
-    assert!(element_root.join("subprompt-a/role-declaration.md").is_file());
-    assert!(element_root.join("subprompt-a/refusal-policy-strict.md").is_file());
+    assert!(element_root
+        .join("subprompt-a/role-declaration.md")
+        .is_file());
+    assert!(element_root
+        .join("subprompt-a/refusal-policy-strict.md")
+        .is_file());
     assert!(element_root.join("subprompt-b").is_dir());
     assert!(element_root.join("subprompt-b/subprompt-b.md").is_file());
-    assert!(element_root.join("subprompt-b/output-format-markdown.md").is_file());
+    assert!(element_root
+        .join("subprompt-b/output-format-markdown.md")
+        .is_file());
     assert!(element_root.join("subprompt-b/tone-direct.md").is_file());
 
     // Each leaf must round-trip parse cleanly with original metadata.
@@ -577,8 +597,8 @@ fn mixed_kind_compose_does_not_collide_with_inner_delimiters() {
     let mixed = compose(ComposeRequest {
         library: &staged_lib,
         inputs: vec![
-            ("inner-compound".into(), None),   // compound, body_level 1
-            ("tone-direct".into(), None),      // atom
+            ("inner-compound".into(), None), // compound, body_level 1
+            ("tone-direct".into(), None),    // atom
         ],
         output_id: "mixed-kind".into(),
         output_name: "Mixed".into(),
@@ -589,7 +609,10 @@ fn mixed_kind_compose_does_not_collide_with_inner_delimiters() {
 
     // The outer compound must escalate body_level to 2 to avoid colliding
     // with the inner compound's level-1 delimiters.
-    assert_eq!(mixed.header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(
+        mixed.header.kind,
+        oovra::header::PromptElementKind::Compound
+    );
     assert_eq!(mixed.header.body_level, Some(2));
 
     // Decompose must succeed because the outer delimiters are level 2
@@ -600,7 +623,10 @@ fn mixed_kind_compose_does_not_collide_with_inner_delimiters() {
     assert_eq!(immediate[1].header.id, "tone-direct");
 
     // The recovered inner is still a valid compound with its own body_level=1.
-    assert_eq!(immediate[0].header.kind, oovra::header::PromptElementKind::Compound);
+    assert_eq!(
+        immediate[0].header.kind,
+        oovra::header::PromptElementKind::Compound
+    );
     assert_eq!(immediate[0].header.body_level, Some(1));
 }
 
@@ -671,11 +697,18 @@ fn migrate_rewrites_library_in_place() {
 
     let summary = migrate_library(&tmp).unwrap();
     assert_eq!(summary.migrated.len(), 3, "all three files should migrate");
-    assert!(summary.failed.is_empty(), "no failures expected: {:?}", summary.failed);
+    assert!(
+        summary.failed.is_empty(),
+        "no failures expected: {:?}",
+        summary.failed
+    );
 
     // After migration, files parse cleanly in v0.2-only mode (no --legacy).
     let migrated_a = parse_file(&tmp.join("atom-a.md")).unwrap();
-    assert_eq!(migrated_a.header.kind, oovra::header::PromptElementKind::Atom);
+    assert_eq!(
+        migrated_a.header.kind,
+        oovra::header::PromptElementKind::Atom
+    );
     let migrated_compound = parse_file(&tmp.join("compound.md")).unwrap();
     assert_eq!(
         migrated_compound.header.kind,
@@ -803,9 +836,15 @@ fn migrate_recursively_rewrites_embedded_frontmatter() {
     let leaves = decompose(&migrated).unwrap();
     assert_eq!(leaves.len(), 2);
     assert_eq!(leaves[0].header.id, "alpha");
-    assert_eq!(leaves[0].header.kind, oovra::header::PromptElementKind::Atom);
+    assert_eq!(
+        leaves[0].header.kind,
+        oovra::header::PromptElementKind::Atom
+    );
     assert_eq!(leaves[1].header.id, "beta");
-    assert_eq!(leaves[1].header.kind, oovra::header::PromptElementKind::Atom);
+    assert_eq!(
+        leaves[1].header.kind,
+        oovra::header::PromptElementKind::Atom
+    );
 }
 
 #[test]

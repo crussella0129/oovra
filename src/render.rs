@@ -13,9 +13,7 @@
 
 use chrono::Utc;
 
-use crate::element::{
-    body_delimiter_close, body_delimiter_open, serialize, PromptElement,
-};
+use crate::element::{body_delimiter_close, body_delimiter_open, serialize, PromptElement};
 use crate::error::{OovraError, Result};
 use crate::header::{InputRef, PromptElementHeader, PromptElementKind};
 use crate::library::Library;
@@ -40,7 +38,12 @@ pub struct ComposeRequest<'a> {
 /// element's delimiter, so an outer scan for `(level + 1)` tildes never
 /// collides with any nested level-`k` (k < level) delimiter.
 pub fn compute_body_level(input_body_levels: &[u32]) -> u32 {
-    input_body_levels.iter().copied().max().map(|m| m + 1).unwrap_or(1)
+    input_body_levels
+        .iter()
+        .copied()
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(1)
 }
 
 /// Compute the **recipe depth** of a Compose output from the depths of its
@@ -57,7 +60,12 @@ pub fn compute_body_level(input_body_levels: &[u32]) -> u32 {
 /// human-readable "how deeply composed is this?" metric exposed for library
 /// filtering and tooling.
 pub fn compute_depth(input_depths: &[u32]) -> u32 {
-    input_depths.iter().copied().max().map(|m| m + 1).unwrap_or(1)
+    input_depths
+        .iter()
+        .copied()
+        .max()
+        .map(|m| m + 1)
+        .unwrap_or(1)
 }
 
 /// Wrap one input's full file content in level-`body_level` open/close
@@ -172,7 +180,11 @@ pub fn render_text(inputs: &[&PromptElement]) -> Result<String> {
 /// the recursion descends.
 fn render_for_paste(element: &PromptElement) -> Result<String> {
     if element.header.is_atom() {
-        return Ok(format!("## {}\n\n{}", element.header.id, element.body.trim()));
+        return Ok(format!(
+            "## {}\n\n{}",
+            element.header.id,
+            element.body.trim()
+        ));
     }
     // Composed element: split its body into immediate sub-elements and
     // render each. This collapses arbitrarily nested compositions into a

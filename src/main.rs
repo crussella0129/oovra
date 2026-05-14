@@ -185,11 +185,7 @@ fn run_create(args: CreateArgs) -> anyhow::Result<()> {
                 meta: args.meta,
             })
             .with_context(|| format!("scaffolding element '{id}'"))?;
-            println!(
-                "{} {}",
-                "Created".green().bold(),
-                path.display()
-            );
+            println!("{} {}", "Created".green().bold(), path.display());
             Ok(())
         }
         (None, Some(source_path)) => {
@@ -201,7 +197,9 @@ fn run_create(args: CreateArgs) -> anyhow::Result<()> {
                         .and_then(|s| s.to_str())
                         .map(|s| s.to_string())
                 })
-                .ok_or_else(|| anyhow!("could not derive an ID from --label path; pass --id explicitly"))?;
+                .ok_or_else(|| {
+                    anyhow!("could not derive an ID from --label path; pass --id explicitly")
+                })?;
             let path = label(LabelArgs {
                 source_path: source_path.clone(),
                 id: id.clone(),
@@ -211,11 +209,7 @@ fn run_create(args: CreateArgs) -> anyhow::Result<()> {
                 force: args.force,
             })
             .with_context(|| format!("labeling element '{id}'"))?;
-            println!(
-                "{} {}",
-                "Labeled".green().bold(),
-                path.display()
-            );
+            println!("{} {}", "Labeled".green().bold(), path.display());
             Ok(())
         }
         (Some(_), Some(_)) => Err(anyhow!("pass exactly one of --new or --label")),
@@ -307,7 +301,12 @@ fn run_compose(args: ComposeArgs, opts: ParseOptions) -> anyhow::Result<()> {
         "Composed".green().bold(),
         output_path.display(),
         composed.header.body_level.unwrap_or(0),
-        composed.header.composed_of.as_ref().map(|v| v.len()).unwrap_or(0)
+        composed
+            .header
+            .composed_of
+            .as_ref()
+            .map(|v| v.len())
+            .unwrap_or(0)
     );
     Ok(())
 }
@@ -359,10 +358,10 @@ fn run_decompose(args: DecomposeArgs, opts: ParseOptions) -> anyhow::Result<()> 
 }
 
 fn run_compare(args: CompareArgs, opts: ParseOptions) -> anyhow::Result<()> {
-    let a = parse_file_with(&args.a, opts)
-        .with_context(|| format!("reading {}", args.a.display()))?;
-    let b = parse_file_with(&args.b, opts)
-        .with_context(|| format!("reading {}", args.b.display()))?;
+    let a =
+        parse_file_with(&args.a, opts).with_context(|| format!("reading {}", args.a.display()))?;
+    let b =
+        parse_file_with(&args.b, opts).with_context(|| format!("reading {}", args.b.display()))?;
     let report = compare(&a, &b)?;
 
     if args.format == "json" {

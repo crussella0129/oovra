@@ -120,7 +120,11 @@ pub fn split_frontmatter(content: &str, path: &Path) -> Result<(String, String)>
     }
 
     // Consume exactly one blank line after the closing delimiter, if present.
-    let body_start = if body_lines.first().map(|l| l.trim().is_empty()).unwrap_or(false) {
+    let body_start = if body_lines
+        .first()
+        .map(|l| l.trim().is_empty())
+        .unwrap_or(false)
+    {
         1
     } else {
         0
@@ -159,12 +163,14 @@ pub fn parse_with(content: &str, path: &Path, opts: ParseOptions) -> Result<Prom
                         path: path.to_path_buf(),
                         source,
                     })?;
-                legacy.into_v2().map_err(|reason| OovraError::InvalidField {
-                    path: path.to_path_buf(),
-                    field: "order",
-                    value: "<legacy>".to_string(),
-                    reason,
-                })?
+                legacy
+                    .into_v2()
+                    .map_err(|reason| OovraError::InvalidField {
+                        path: path.to_path_buf(),
+                        field: "order",
+                        value: "<legacy>".to_string(),
+                        reason,
+                    })?
             } else {
                 return Err(OovraError::InvalidToml {
                     path: path.to_path_buf(),
@@ -264,13 +270,15 @@ fn validate_atom(header: &PromptElementHeader, path: &Path) -> Result<()> {
 
 fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
     // Compounds require composed_of plus all composition metadata.
-    let composed_of = header.composed_of.as_ref().ok_or_else(|| {
-        OovraError::CompoundMissingField {
-            path: path.to_path_buf(),
-            id: header.id.clone(),
-            field: "composed_of",
-        }
-    })?;
+    let composed_of =
+        header
+            .composed_of
+            .as_ref()
+            .ok_or_else(|| OovraError::CompoundMissingField {
+                path: path.to_path_buf(),
+                id: header.id.clone(),
+                field: "composed_of",
+            })?;
     if composed_of.is_empty() {
         return Err(OovraError::InvalidField {
             path: path.to_path_buf(),
@@ -298,13 +306,15 @@ fn validate_compound(header: &PromptElementHeader, path: &Path) -> Result<()> {
         }
     }
 
-    let generated_at = header.generated_at.as_deref().ok_or_else(|| {
-        OovraError::CompoundMissingField {
-            path: path.to_path_buf(),
-            id: header.id.clone(),
-            field: "generated_at",
-        }
-    })?;
+    let generated_at =
+        header
+            .generated_at
+            .as_deref()
+            .ok_or_else(|| OovraError::CompoundMissingField {
+                path: path.to_path_buf(),
+                id: header.id.clone(),
+                field: "generated_at",
+            })?;
     if !is_valid_rfc3339(generated_at) {
         return Err(OovraError::InvalidField {
             path: path.to_path_buf(),
@@ -465,7 +475,13 @@ mod tests {
     fn parse_rejects_non_semver_version() {
         let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"v1.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::InvalidField { field: "version", .. }));
+        assert!(matches!(
+            err,
+            OovraError::InvalidField {
+                field: "version",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -473,7 +489,13 @@ mod tests {
         // A file claiming kind = "compound" but with no recipe is rejected.
         let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::CompoundMissingField { field: "composed_of", .. }));
+        assert!(matches!(
+            err,
+            OovraError::CompoundMissingField {
+                field: "composed_of",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -492,20 +514,33 @@ mod tests {
         // Atom file with compound-only fields set should be rejected.
         let content = "+++\nname = \"X\"\nkind = \"atom\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\nbody_level = 1\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::AtomHasForbiddenField { field: "body_level", .. }));
+        assert!(matches!(
+            err,
+            OovraError::AtomHasForbiddenField {
+                field: "body_level",
+                ..
+            }
+        ));
     }
 
     #[test]
     fn parse_rejects_compound_without_body_level() {
         let content = "+++\nname = \"X\"\nkind = \"compound\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\ngenerated_at = \"2026-05-09T14:23:15Z\"\nrender_mode = \"markdown-h2\"\ncomposed_of = [{id = \"a\", version = \"1.0.0\"}]\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
-        assert!(matches!(err, OovraError::CompoundMissingField { field: "body_level", .. }));
+        assert!(matches!(
+            err,
+            OovraError::CompoundMissingField {
+                field: "body_level",
+                ..
+            }
+        ));
     }
 
     #[test]
     fn parse_rejects_missing_kind() {
         // v0.2 SPEC §7.2: missing `kind` is a hard error in v0.2.
-        let content = "+++\nname = \"X\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
+        let content =
+            "+++\nname = \"X\"\nid = \"x\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let err = parse(content, Path::new("x.md")).unwrap_err();
         assert!(matches!(err, OovraError::InvalidToml { .. }));
     }
@@ -584,6 +619,9 @@ mod tests {
         let content = "+++\nname = \"Bad\"\norder = 1\nid = \"bad\"\nversion = \"1.0.0\"\nmeta = \"\"\n+++\n\nbody\n";
         let opts = ParseOptions { legacy: true };
         let err = parse_with(content, Path::new("bad.md"), opts).unwrap_err();
-        assert!(matches!(err, OovraError::InvalidField { field: "order", .. }));
+        assert!(matches!(
+            err,
+            OovraError::InvalidField { field: "order", .. }
+        ));
     }
 }
