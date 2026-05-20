@@ -234,29 +234,32 @@ impl OovraApp {
 
     /// Render the Library Components as a recursive tree, schema-style.
     ///
-    /// Top level is the library's *roots* (elements not referenced
-    /// inside any other element's `composed_of`) — so a component
-    /// that's already a sub-item of a compound only appears under
-    /// that compound, never duplicated at the top.
+    /// Backing data is [`oovra::Library::component_tree`], which gives
+    /// a forest with each id appearing AT MOST ONCE — top-level is
+    /// just the recipe-DAG roots, and within the tree a component
+    /// that shows up at multiple paths is rendered at its first
+    /// encounter (depth-first pre-order). This fixes the
+    /// "correlated list items" issue: two visual instances of the
+    /// same id with synchronized checkboxes.
     ///
     /// Atoms render as leaf rows. Compounds render as
-    /// `CollapsingHeader`s containing their inputs (which themselves
-    /// recurse). Each row keeps the two-click-target pattern: the
-    /// left checkbox controls canvas inclusion; the row body opens
-    /// the component in the editor.
+    /// `CollapsingHeader`s containing their (deduped) children.
+    /// Each row keeps the two-click-target pattern: the left
+    /// checkbox controls canvas inclusion (with leaf-cascade for
+    /// compounds); the row body opens the component in the editor.
     fn render_component_tree(&mut self, ui: &mut egui::Ui) {
         if self.atom_index.is_empty() {
             ui.weak("(no olib selected — pick one on the left)");
             return;
         }
-        let top_ids: Vec<String> = self
+        let forest: Vec<oovra::ComponentNode> = self
             .loaded
             .as_ref()
-            .map(|lib| lib.roots())
+            .map(|lib| lib.component_tree())
             .unwrap_or_default();
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for id in top_ids {
-                self.render_tree_node(ui, &id, 0);
+            for node in &forest {
+                self.render_component_node(ui, node, 0);
             }
         });
         // Whichever expand/collapse-all the user requested was applied
@@ -266,66 +269,57 @@ impl OovraApp {
 
     /// Render one node of the component tree. Recurses into a
     /// compound's `composed_of` inputs.
-    fn render_tree_node(&mut self, ui: &mut egui::Ui, id: &str, depth: u32) {
+    /// Render a single deduplicated tree node. The recursive walk
+    /// is over `node.children` — already deduped by the library —
+    /// instead of raw `composed_of`.
+    fn render_component_node(
+        &mut self,
+        ui: &mut egui::Ui,
+        node: &oovra::ComponentNode,
+        depth: u32,
+    ) {
         // Defensive depth cap; real recipes are nowhere near this.
         if depth > 16 {
             ui.weak("(depth limit reached)");
             return;
         }
-        // Pull the kind + child id list + leaf atoms (for cascade)
-        // in a single scoped block so self.loaded isn't borrowed
-        // across the recursive call.
-        let (kind, inputs, leaves): (oovra::PromptElementKind, Vec<String>, Vec<String>) = {
-            let Some(lib) = &self.loaded else {
-                return;
-            };
-            let Some(elem) = lib.elements.get(id) else {
-                ui.weak(format!("(missing: {id})"));
-                return;
-            };
-            let inputs = elem
-                .header
-                .composed_of
+        // Cascade leaves still derive from the *underlying* library
+        // (not the deduped display tree) so a compound's checkbox
+        // reflects every leaf in its real recipe, even those whose
+        // display nodes were suppressed elsewhere.
+        let leaves: Vec<String> = match node.kind {
+            oovra::PromptElementKind::Atom => vec![node.id.clone()],
+            oovra::PromptElementKind::Compound => self
+                .loaded
                 .as_ref()
-                .map(|v| v.iter().map(|i| i.id.clone()).collect())
-                .unwrap_or_default();
-            let leaves = match elem.header.kind {
-                oovra::PromptElementKind::Atom => vec![id.to_string()],
-                oovra::PromptElementKind::Compound => lib.leaf_atoms(id),
-            };
-            (elem.header.kind, inputs, leaves)
+                .map(|lib| lib.leaf_atoms(&node.id))
+                .unwrap_or_default(),
         };
 
-        // Editor-selection highlight: the row whose component is
-        // currently loaded in the Component Editor.
-        let is_sel = self.editor.as_ref().map(|ed| ed.id == id).unwrap_or(false);
+        // Editor-selection highlight: which row matches the open
+        // editor's id (if any).
+        let is_sel = self
+            .editor
+            .as_ref()
+            .map(|ed| ed.id == node.id)
+            .unwrap_or(false);
+        let id = node.id.clone();
 
-        match kind {
+        match node.kind {
             oovra::PromptElementKind::Atom => {
                 ui.horizontal(|ui| {
-                    let mut included = self.canvas.contains(id);
+                    let mut included = self.canvas.contains(&id);
                     if ui.checkbox(&mut included, "").changed() {
-                        // Atom checkbox: toggle just this atom.
-                        self.canvas.toggle(id);
+                        self.canvas.toggle(&id);
                     }
                     let label = format!("·  {id}");
                     if ui.selectable_label(is_sel, label).clicked() {
-                        self.select_component_by_id(id);
+                        self.select_component_by_id(&id);
                     }
                 });
             }
             oovra::PromptElementKind::Compound => {
                 ui.horizontal(|ui| {
-                    // Cascade semantics: a compound's checkbox is a
-                    // master that toggles all LEAF atoms in its
-                    // subtree. The compound itself is not placed in
-                    // the canvas — only its leaf atoms — which keeps
-                    // a later compose from duplicating content via a
-                    // nested-compound input. Displayed state = "any
-                    // leaf atom in this subtree is currently in
-                    // canvas," so individual unchecks of leaves leave
-                    // the parent shown only as long as a sibling
-                    // is still selected.
                     let any_leaf_in_canvas = leaves.iter().any(|d| self.canvas.contains(d));
                     let mut shown = any_leaf_in_canvas;
                     if ui.checkbox(&mut shown, "").changed() {
@@ -346,8 +340,8 @@ impl OovraApp {
                         header = header.open(Some(open));
                     }
                     header.show(ui, |ui| {
-                        for child_id in inputs {
-                            self.render_tree_node(ui, &child_id, depth + 1);
+                        for child in &node.children {
+                            self.render_component_node(ui, child, depth + 1);
                         }
                     });
                 });

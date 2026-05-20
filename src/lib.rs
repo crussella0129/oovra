@@ -28,7 +28,7 @@ pub use element::{
 };
 pub use error::{OovraError, Result};
 pub use header::{InputRef, LegacyHeader, PromptElementHeader, PromptElementKind};
-pub use library::Library;
+pub use library::{ComponentNode, Library};
 
 /// The version of the `oovra` library crate, sourced from `Cargo.toml`
 /// at compile time. Exposed so downstream crates (the `oovra-gui`

@@ -163,6 +163,59 @@ impl Library {
             }
         }
     }
+
+    /// Build a deduplicated forest for the GUI's "schema menu" tree
+    /// view. Each id appears AT MOST ONCE in the entire returned set
+    /// of trees. Traversal is depth-first pre-order starting from
+    /// [`Library::roots`]; a child that's already been visited
+    /// earlier in the walk is omitted from its parent's `children`
+    /// list (this is the fix for the "correlated list items" bug
+    /// where an atom referenced by two compounds in the same recipe
+    /// DAG was being rendered twice with synchronized checkboxes).
+    ///
+    /// This does NOT change the underlying recipe — each compound's
+    /// `composed_of` is unchanged on disk; this is purely a display
+    /// projection.
+    pub fn component_tree(&self) -> Vec<ComponentNode> {
+        let mut seen: HashSet<String> = HashSet::new();
+        self.roots()
+            .into_iter()
+            .filter_map(|id| self.build_component_node(&id, &mut seen))
+            .collect()
+    }
+
+    fn build_component_node(&self, id: &str, seen: &mut HashSet<String>) -> Option<ComponentNode> {
+        if !seen.insert(id.to_string()) {
+            return None;
+        }
+        let elem = self.elements.get(id)?;
+        let children: Vec<ComponentNode> = elem
+            .header
+            .composed_of
+            .as_ref()
+            .map(|inputs| {
+                inputs
+                    .iter()
+                    .filter_map(|i| self.build_component_node(&i.id, seen))
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(ComponentNode {
+            id: id.to_string(),
+            kind: elem.header.kind,
+            children,
+        })
+    }
+}
+
+/// One node of the deduplicated [`Library::component_tree`] forest.
+/// `children` lists the deduped sub-nodes in declared `composed_of`
+/// order; nodes whose ids appeared earlier in the walk are absent.
+#[derive(Debug, Clone)]
+pub struct ComponentNode {
+    pub id: String,
+    pub kind: PromptElementKind,
+    pub children: Vec<ComponentNode>,
 }
 
 #[cfg(test)]
@@ -231,6 +284,117 @@ mod tests {
         assert_eq!(lib.leaf_atoms("c"), vec!["a", "b"]);
         // For an atom, the function returns itself.
         assert_eq!(lib.leaf_atoms("a"), vec!["a"]);
+    }
+
+    /// Recursive count following raw `composed_of` (no dedup). This is
+    /// the SHAPE of the old GUI tree renderer's walk. Used to
+    /// document the bug.
+    fn naive_walk_count_id(lib: &Library, id: &str, target: &str) -> usize {
+        let Some(elem) = lib.elements.get(id) else {
+            return 0;
+        };
+        let mut count = if id == target { 1 } else { 0 };
+        if let Some(inputs) = &elem.header.composed_of {
+            for input in inputs {
+                count += naive_walk_count_id(lib, &input.id, target);
+            }
+        }
+        count
+    }
+
+    /// Count occurrences of `target` in the deduped `component_tree`.
+    fn deduped_tree_count_id(forest: &[ComponentNode], target: &str) -> usize {
+        let mut count = 0;
+        for node in forest {
+            if node.id == target {
+                count += 1;
+            }
+            count += deduped_tree_count_id(&node.children, target);
+        }
+        count
+    }
+
+    /// Build the mock library's diamond shape: an atom A, a compound
+    /// `c-inner` containing `[a]`, and a compound `c-outer`
+    /// containing `[c-inner, a]`. `a` appears at two depths.
+    fn diamond_lib(dir: &Path) -> Library {
+        let olib = dir.join("olib");
+        fs::create_dir_all(&olib).unwrap();
+        crate::create::label_into_olib(&olib, "a body", "a", "1.0.0", "").unwrap();
+        let lib = Library::load(&olib).unwrap();
+        let c_inner = crate::render::compose(crate::render::ComposeRequest {
+            library: &lib,
+            inputs: vec![("a".to_owned(), Some("1.0.0".to_owned()))],
+            output_id: "c-inner".to_owned(),
+            output_name: "c-inner".to_owned(),
+            output_version: "1.0.0".to_owned(),
+            output_meta: String::new(),
+        })
+        .unwrap();
+        crate::element::write(&c_inner, &olib.join("c-inner.md")).unwrap();
+        let lib = Library::load(&olib).unwrap();
+        let c_outer = crate::render::compose(crate::render::ComposeRequest {
+            library: &lib,
+            inputs: vec![
+                ("c-inner".to_owned(), Some("1.0.0".to_owned())),
+                ("a".to_owned(), Some("1.0.0".to_owned())),
+            ],
+            output_id: "c-outer".to_owned(),
+            output_name: "c-outer".to_owned(),
+            output_version: "1.0.0".to_owned(),
+            output_meta: String::new(),
+        })
+        .unwrap();
+        crate::element::write(&c_outer, &olib.join("c-outer.md")).unwrap();
+        Library::load(&olib).unwrap()
+    }
+
+    #[test]
+    fn diagnostic_naive_walk_double_counts_diamond_leaf() {
+        // BUG, captured: walking `composed_of` raw (the shape of the
+        // pre-fix GUI tree renderer) makes the diamond leaf appear
+        // TWICE under c-outer — once via c-outer.composed_of[1]
+        // (the direct `a`), and once via c-inner.composed_of[0]
+        // (the nested `a`). Synchronized checkboxes follow.
+        let dir = tempdir("diagnostic-naive");
+        let lib = diamond_lib(&dir);
+        assert_eq!(naive_walk_count_id(&lib, "c-outer", "a"), 2);
+    }
+
+    #[test]
+    fn component_tree_dedupes_diamond_leaf() {
+        // FIX: the deduped tree shows `a` exactly once, at its
+        // first-encountered position (depth 2, under c-inner, which
+        // is c-outer's first child).
+        let dir = tempdir("component-tree-diamond");
+        let lib = diamond_lib(&dir);
+        let forest = lib.component_tree();
+        // Forest root count: c-outer is the only root (c-inner and a
+        // are both inputs of something).
+        assert_eq!(forest.len(), 1);
+        assert_eq!(forest[0].id, "c-outer");
+        // `a` appears exactly once in the entire forest.
+        assert_eq!(deduped_tree_count_id(&forest, "a"), 1);
+        // c-outer has exactly one child rendered (c-inner). The
+        // duplicate `a` at c-outer's depth is suppressed.
+        assert_eq!(forest[0].children.len(), 1);
+        assert_eq!(forest[0].children[0].id, "c-inner");
+        // `a` lives inside c-inner.
+        assert_eq!(forest[0].children[0].children.len(), 1);
+        assert_eq!(forest[0].children[0].children[0].id, "a");
+    }
+
+    #[test]
+    fn component_tree_keeps_non_diamond_children_in_order() {
+        // Regression: for the simple "c contains a, b" case (no
+        // diamond), both children render in their declared order.
+        let dir = tempdir("component-tree-simple");
+        let lib = small_lib(&dir);
+        let forest = lib.component_tree();
+        assert_eq!(forest.len(), 1);
+        assert_eq!(forest[0].id, "c");
+        let child_ids: Vec<&str> = forest[0].children.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(child_ids, vec!["a", "b"]);
     }
 
     #[test]
