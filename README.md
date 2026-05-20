@@ -40,6 +40,28 @@ cargo install --path .
 # which rustup put on your PATH — invoke `oovra` from any directory afterward
 ```
 
+`oovra` is a Cargo workspace. `cargo install --path .` builds **only**
+the root package (the CLI) — it does not download or compile the
+GUI's eframe/wgpu/winit tree. That makes it the right install for a
+headless box (CI runner, agent host).
+
+### Full GUI install (optional)
+
+The repo also ships an all-Rust desktop + WASM front-end in [`gui/`](./gui/),
+package name `oovra-gui`. Install it alongside the CLI with:
+
+```bash
+cargo install --path gui
+# installs `oovra-gui` to ~/.cargo/bin/ ; the binary links the same
+# `oovra` library crate the CLI uses (no subprocess, shared types)
+```
+
+For the WASM build, install [Trunk](https://trunkrs.dev/) once
+(`cargo install --locked trunk`) and then from `gui/`:
+`trunk serve` (dev) or `trunk build --release` (deployable static site
+in `gui/dist/`). First build pulls a large dep tree (eframe, wgpu,
+winit); subsequent builds are incremental.
+
 If `oovra` isn't found right after install, your PATH may need refreshing — open a new terminal, or on Linux/macOS run `source ~/.cargo/env`.
 
 ### Local build alternative
@@ -47,7 +69,8 @@ If `oovra` isn't found right after install, your PATH may need refreshing — op
 If you don't want a global install, build into the project's `target/` directory and run from there:
 
 ```bash
-cargo build --release
+cargo build --release                   # builds the workspace (CLI + GUI)
+cargo build --release -p oovra          # builds just the CLI
 ./target/release/oovra --version        # Linux / macOS / WSL / git-bash
 .\target\release\oovra.exe --version    # Windows PowerShell or cmd
 ```
@@ -55,37 +78,50 @@ cargo build --release
 ## Quick tour
 
 ```bash
-# Author an atom
-oovra create --new role-declaration --library ./elements --name "Role Declaration"
+# Author atoms from plain Markdown files you wrote in an editor.
+# --label headers each file IN PLACE (the file becomes the element):
+oovra create --label role-declaration.md refusal-policy-strict.md
 
-# Compose three atoms into a compound
-oovra compose --library ./elements \
+# --olib copies headered elements into ./olib/, leaving the drafts plain.
+# Accepts files and/or directories:
+oovra create --olib ./drafts/
+
+# An input that is already an Oovra file is copied verbatim — so --olib
+# also moves elements between libraries (olib-to-olib transfer):
+oovra create --olib ../other-project/olib/
+
+# Compose three atoms into a compound (library defaults to ./olib)
+oovra compose \
   --out-id coding-agent --out-name "Coding Agent" \
-  -o ./elements/coding-agent.md \
+  -o ./olib/coding-agent.md \
   role-declaration refusal-policy-strict tone-direct
 
 # Get a clean prompt to paste into a model (no Oovra metadata)
-oovra compose --library ./elements --text \
-  role-declaration refusal-policy-strict tone-direct
+oovra compose --text role-declaration refusal-policy-strict tone-direct
 
 # Decompose one level down — list the immediate inputs
-oovra decompose ./elements/coding-agent.md
+oovra decompose ./olib/coding-agent.md
 
 # Decompose all the way to atom leaves as a folder tree
-oovra decompose --full -o ./out ./elements/coding-agent.md
+oovra decompose --full -o ./out ./olib/coding-agent.md
 
 # Diff two compositions structurally (added/removed/version-changed/moved inputs)
-oovra compare ./elements/coding-agent-v1.md ./elements/coding-agent-v2.md
+oovra compare ./olib/coding-agent-v1.md ./olib/coding-agent-v2.md
 
 # Migrate a v0.1 library to v0.2 schema in place
-oovra migrate ./elements
+oovra migrate ./olib
 ```
+
+`oovra create` is file-based: you write prompt content in plain `.md`
+files (no shell-quoting fights) and `create` headers them. The element
+id is the filename stem; a non-kebab-case name is slugified after a
+prompt (`--slug` to skip the prompt, e.g. for scripts and agents).
 
 ## The four operators (and one migration helper)
 
 | Operator | What it does | Sheet analog |
 |---|---|---|
-| `oovra create` | Author a new atom (or label an existing `.md`) | (cell entry) |
+| `oovra create` | Header plain `.md` files into atoms — `--label` in place, `--olib` as copies into the library | (cell entry) |
 | `oovra compose` | Join ordered inputs into a compound | JOIN |
 | `oovra decompose` | Recover the inputs of a compound (one level or `--full`) | SPLIT |
 | `oovra compare` | Diff two elements (kind-aware: content for atoms, **sequence-aware structural** for compounds) | FORWARD-DIFF |

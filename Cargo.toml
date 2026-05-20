@@ -1,4 +1,5 @@
 [workspace]
+members = [".", "gui"]
 
 [package]
 name = "oovra"

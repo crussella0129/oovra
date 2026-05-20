@@ -1,0 +1,27 @@
+[package]
+name = "oovra-gui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92"
+description = "All-Rust GUI front-end for the oovra prompt-element tool (native + WASM via eframe)."
+license = "MIT OR Apache-2.0"
+authors = ["Charles Russell <crussella0129@gmail.com>"]
+repository = "https://github.com/crussella0129/oovra"
+
+[[bin]]
+name = "oovra-gui"
+path = "src/main.rs"
+
+[dependencies]
+oovra = { path = ".." }
+egui = "0.34"
+eframe = { version = "0.34", features = ["persistence"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger = "0.11"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4"
+web-sys = "0.3"
