@@ -42,6 +42,28 @@ impl CanvasState {
         }
     }
 
+    /// Add an id if absent; no-op if already present. Returns true
+    /// if the canvas grew. Idempotent.
+    pub fn add(&mut self, id: &str) -> bool {
+        if !self.contains(id) {
+            self.order.push(id.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove an id if present; no-op if absent. Returns true if the
+    /// canvas shrank. Idempotent.
+    pub fn remove(&mut self, id: &str) -> bool {
+        if let Some(pos) = self.order.iter().position(|x| x == id) {
+            self.order.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Render the live prose preview from the current order.
     /// Returns an error if any id in `order` is missing from `lib`.
     pub fn live_preview(&self, lib: &Library) -> Result<String, OovraError> {
@@ -145,6 +167,19 @@ mod tests {
 
         // Removing middle preserves the others' order.
         c.toggle("b");
+        assert_eq!(c.order, vec!["a", "c"]);
+    }
+
+    #[test]
+    fn canvas_add_and_remove_are_idempotent() {
+        let mut c = CanvasState::new();
+        assert!(c.add("a"));
+        assert!(!c.add("a")); // second add is no-op
+        assert_eq!(c.order, vec!["a"]);
+        c.add("b");
+        c.add("c");
+        assert!(c.remove("b"));
+        assert!(!c.remove("b")); // second remove is no-op
         assert_eq!(c.order, vec!["a", "c"]);
     }
 
