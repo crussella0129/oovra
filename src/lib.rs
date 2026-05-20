@@ -14,6 +14,7 @@
 pub mod create;
 pub mod decompose;
 pub mod diff;
+pub mod discovery;
 pub mod element;
 pub mod error;
 pub mod header;
@@ -21,6 +22,7 @@ pub mod library;
 pub mod migrate;
 pub mod render;
 
+pub use discovery::{discover, DiscoveredOlib};
 pub use element::{
     parse, parse_file, parse_file_with, parse_with, serialize, write, ParseOptions, PromptElement,
 };

@@ -8,8 +8,9 @@ completed entries are removed from this file and appended to
 This file is independent of any single sprint — it persists across
 sprints and reflects the work currently in flight.
 
-## (empty)
+## (empty — between sprints)
 
-Sprint s0 is closed. The next sprint's tasks will be populated from
-`sprints/s1/sprint-plans/build-plan.md` once the user gives the go for
-sprint s1.
+Sprint s1 is closed. Sprint s2 (embedded oovra-particle editor) is
+the next pickup; its tasks will be populated from
+`sprints/s2/sprint-plans/build-plan.md` once that file is written
+in the s2 Plan Phase.

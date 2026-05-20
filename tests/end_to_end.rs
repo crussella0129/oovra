@@ -949,6 +949,41 @@ fn compare_refuses_atom_vs_compound() {
     assert!(matches!(err, oovra::OovraError::KindMismatch { .. }));
 }
 
+#[test]
+fn discover_finds_two_nested_olibs() {
+    // s1 integration: build a tree with two olib dirs at different depths,
+    // assert discover() returns both with the right .md counts.
+    use oovra::discovery::discover;
+    let root = tempdir_for_test("discover-nested");
+
+    // Shallow olib: root/proj-a/olib/{intro.md, tone.md}
+    let shallow = root.join("proj-a").join("olib");
+    std::fs::create_dir_all(&shallow).unwrap();
+    std::fs::write(shallow.join("intro.md"), "plain intro").unwrap();
+    std::fs::write(shallow.join("tone.md"), "plain tone").unwrap();
+
+    // Deeper olib: root/proj-b/sub/olib/atom.md
+    let deep = root.join("proj-b").join("sub").join("olib");
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join("atom.md"), "plain atom").unwrap();
+
+    // Decoy: a non-olib directory with .md files MUST NOT be returned.
+    let decoy = root.join("notes");
+    std::fs::create_dir_all(&decoy).unwrap();
+    std::fs::write(decoy.join("scratch.md"), "should be ignored").unwrap();
+
+    let results = discover(&root, None).expect("discover should succeed");
+
+    let paths: Vec<_> = results.iter().map(|d| d.path.clone()).collect();
+    assert_eq!(
+        paths,
+        vec![shallow.clone(), deep.clone()],
+        "discover must return both olibs in deterministic (sorted) order"
+    );
+    let counts: Vec<_> = results.iter().map(|d| d.md_count).collect();
+    assert_eq!(counts, vec![2, 1]);
+}
+
 /// Lightweight tempdir helper. Creates a unique directory under
 /// `target/tmp/<name>-<pid>/` that lives for the duration of the test process.
 fn tempdir_for_test(name: &str) -> std::path::PathBuf {

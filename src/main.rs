@@ -16,6 +16,7 @@ use owo_colors::OwoColorize;
 use oovra::create::{copy_oovra_into_olib, ensure_dir, label_in_place, label_into_olib};
 use oovra::decompose::{decompose_full, report};
 use oovra::diff::{compare, DiffReport};
+use oovra::discovery::discover;
 use oovra::element::{
     looks_like_oovra_file, parse, parse_file_with, serialize, write, ParseOptions, PromptElement,
 };
@@ -50,6 +51,9 @@ enum Command {
 
     /// Compare two prompt elements
     Compare(CompareArgs),
+
+    /// Discover olib directories under a filesystem root
+    Discover(DiscoverArgs),
 
     /// Migrate a v0.1 library to v0.2 schema in place
     Migrate(MigrateArgs),
@@ -160,6 +164,20 @@ struct CompareArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct DiscoverArgs {
+    /// Filesystem root to walk
+    root: PathBuf,
+
+    /// Optional depth bound (root itself is depth 0; no limit by default)
+    #[arg(long)]
+    max_depth: Option<usize>,
+
+    /// Output format: human (default) or json
+    #[arg(long, default_value = "human")]
+    format: String,
+}
+
+#[derive(clap::Args, Debug)]
 struct MigrateArgs {
     /// Library directory to migrate in place. Recursive. Run in a clean
     /// Git working directory so the diff is auditable.
@@ -174,6 +192,7 @@ fn main() -> anyhow::Result<()> {
         Command::Compose(args) => run_compose(args, opts),
         Command::Decompose(args) => run_decompose(args, opts),
         Command::Compare(args) => run_compare(args, opts),
+        Command::Discover(args) => run_discover(args),
         Command::Migrate(args) => run_migrate(args),
     }
 }
@@ -720,6 +739,42 @@ fn run_compare(args: CompareArgs, opts: ParseOptions) -> anyhow::Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn run_discover(args: DiscoverArgs) -> anyhow::Result<()> {
+    let results = discover(&args.root, args.max_depth)
+        .with_context(|| format!("discovering under {}", args.root.display()))?;
+
+    if args.format == "json" {
+        let s = serde_json::to_string(&results)?;
+        println!("{s}");
+        return Ok(());
+    }
+
+    let depth_label = match args.max_depth {
+        Some(n) => format!("max depth: {n}"),
+        None => "max depth: unlimited".to_string(),
+    };
+    println!(
+        "{} {} ({})",
+        "Discover".bold(),
+        args.root.display(),
+        depth_label.dimmed()
+    );
+    if results.is_empty() {
+        println!("  (no olibs found)");
+    } else {
+        for d in &results {
+            println!(
+                "  {} {}  {}",
+                "✓".green(),
+                d.path.display(),
+                format!("({} .md)", d.md_count).dimmed()
+            );
+        }
+    }
+    println!("{} olib(s) found.", results.len());
     Ok(())
 }
 

@@ -62,5 +62,74 @@ as tasks are dispatched from `agent-tasks.md`. Persists across sprints.
 - **Sprint s0 close** (2026-05-19) — `unit-tests.md`,
   `integration-tests.md`, `e2e-tests.md`, and `test-report.md`
   authored in `sprints/s0/sprint-tests/`. Acceptance criteria all
-  satisfied. Two logical changes (`create` redesign + s0 bootstrap)
-  sit uncommitted, awaiting user authorization.
+  satisfied. The s0 + create-redesign work landed as two commits
+  on branch `feat/create-redesign-and-gui-bootstrap`.
+
+---
+
+## Sprint s1 — Olib autodiscovery + file explorer panel
+
+### Library
+
+- **L.1** (2026-05-19) — Added `src/discovery.rs` with
+  `DiscoveredOlib { path, md_count }` and `discover(root, max_depth)`.
+  Walks via `walkdir`, filters dirs named `olib` (case-insensitive),
+  counts `.md` files non-recursively, sorts by path. Errors
+  mid-walk are stderr'd and skipped.
+- **L.2** (2026-05-19) — Wired into `src/lib.rs`; re-exported
+  `discover` and `DiscoveredOlib` at the crate root.
+- **L.3** (2026-05-19) — Six unit tests in `discovery.rs::tests`
+  covering shallow / deep / max_depth / non-olib / missing-root /
+  deterministic ordering.
+
+### CLI
+
+- **C.1–C.3** (2026-05-19) — Added `Command::Discover(DiscoverArgs)`
+  and `run_discover()` in `src/main.rs`. Subcommand:
+  `oovra discover <root> [--max-depth N] [--format human|json]`.
+  Human format prints a colored summary; JSON format prints a
+  single-line `serde_json` array. CLI re-installed via
+  `cargo install --path .`.
+- **C.4** (2026-05-19) — Added `discover_finds_two_nested_olibs`
+  integration test in `tests/end_to_end.rs` — builds a temp tree
+  with two olibs and a decoy, asserts paths + md counts.
+
+### GUI
+
+- **G.1** (2026-05-19) — Added `rfd = "0.15"` to `gui/Cargo.toml`
+  behind `cfg(not(target_arch = "wasm32"))` so the wasm32 build
+  doesn't pull it in.
+- **G.2 / G.3 / G.4** (2026-05-19) — Rewrote `gui/src/app.rs` for
+  the s1 layout: top toolbar with `Open folder…` (native: rfd;
+  wasm32: deferred-feature stub), left sidebar listing discovered
+  olibs, central panel showing the selected olib's atoms with id /
+  kind / version / meta. The s0 kebab/slugify probe is preserved
+  in a collapsing section for sprint-over-sprint visual diff.
+  Heavy state fields `#[serde(skip)]`; persisted only
+  `kebab_probe` and `roots`. Added a `short_path` helper +
+  two unit tests; expanded the existing smoke test to assert the
+  new state fields initialize empty.
+
+### Test Phase
+
+- **Issue 1 fix** (2026-05-20) — egui 0.34.2 deprecated
+  `TopBottomPanel`/`SidePanel` aliases and `default_width`.
+  Silenced with `#[allow(deprecated)]` on the `App::ui` impl and
+  a TODO note for a follow-up migration sprint.
+- **Issue 2 fix** (2026-05-20) — `open_folder` flagged dead on
+  wasm32 (its only caller is the native rfd branch). Added
+  `#[cfg_attr(target_arch = "wasm32", allow(dead_code))]`.
+- **T.1** (2026-05-19) — `cargo test -p oovra` 36 + 4 + 24 = **64
+  tests PASS** (57 prior + 6 lib unit + 1 integration).
+- **T.2** (2026-05-20) — `cargo test -p oovra-gui` 3 tests PASS in
+  15.56s.
+- **T.3** (2026-05-20) — `cargo build --target
+  wasm32-unknown-unknown -p oovra-gui` PASS, 9.94s.
+- **T.4** (2026-05-19/20) — `oovra discover` CLI smoke (human +
+  json) PASS against the s1 demo tree at `C:\Users\charl\oovra-demo`.
+- **T.5** (2026-05-20) — `cargo run -p oovra-gui` background;
+  window up PID 57812, title `oovra-gui`. Layout matches the spec;
+  awaiting the user's visual review whenever they return.
+- **Sprint s1 close** (2026-05-20) — `unit-tests.md`,
+  `integration-tests.md`, `e2e-tests.md`, `test-report.md`
+  authored. Acceptance criteria all satisfied.
