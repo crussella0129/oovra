@@ -284,23 +284,23 @@ impl OovraApp {
 
         ui.separator();
         ui.label("Live preview:");
-        let mut preview = match &self.loaded {
+        let preview = match &self.loaded {
             Some(lib) => self
                 .canvas
                 .live_preview(lib)
                 .unwrap_or_else(|e| format!("preview error: {e}")),
             None => "(no olib loaded — select one to preview)".to_owned(),
         };
+        // Render the rendered prompt as ordinary wrapped text — same
+        // font as the rest of the UI — rather than a bordered
+        // monospace TextEdit (which read as a terminal panel and
+        // visually broke from the surrounding layout). Selectable so
+        // the user can still copy the rendered prompt out.
         egui::ScrollArea::vertical()
-            .max_height(220.0)
+            .max_height(260.0)
+            .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.add(
-                    egui::TextEdit::multiline(&mut preview)
-                        .desired_width(f32::INFINITY)
-                        .desired_rows(10)
-                        .font(egui::TextStyle::Monospace)
-                        .interactive(false),
-                );
+                ui.add(egui::Label::new(&preview).selectable(true));
             });
 
         ui.separator();
