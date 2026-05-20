@@ -78,6 +78,43 @@ add deps must keep `cargo install --path .` lean (no eframe / wgpu /
 winit downloads). Verify with `cargo build -p oovra` for fast
 sanity.
 
+## Cross-platform requirement
+
+**`oovra` runs on Ubuntu Linux as well as Windows.** Treat Linux as
+a first-class target, not an afterthought:
+
+- The Rust code must not assume Windows path separators, the `.exe`
+  binary suffix, Windows registry, or Windows-only APIs. The only
+  acceptable Windows-specific code is `cfg`-gated and matched with
+  a Linux/macOS counterpart where the feature warrants one (e.g.
+  the `#![cfg_attr(not(debug_assertions), windows_subsystem =
+  "windows")]` attribute in `gui/src/main.rs` is fine — the attr
+  only applies on Windows builds, with no Linux side effect).
+- Build verification on Linux is available via WSL Ubuntu on this
+  machine. Use a **separate target directory** so the Linux and
+  Windows builds don't fight over `target/`:
+
+  ```bash
+  wsl.exe -- bash -lc 'source $HOME/.cargo/env && \
+    cd /mnt/c/Users/charl/oovra && \
+    CARGO_TARGET_DIR=/tmp/oovra-linux-target cargo build -p oovra'
+  ```
+
+  Run the same recipe with `cargo test -p oovra` to exercise the
+  test suite Linux-side.
+- The GUI's native window needs an X server / Wayland on Linux.
+  WSLg (Windows 11) provides this transparently; on a bare Linux
+  box `cargo run -p oovra-gui` opens a window the same way it
+  does on Windows.
+- Native Linux build deps for eframe (per the upstream
+  `eframe_template` README): `libxcb-render0-dev libxcb-shape0-dev
+  libxcb-xfixes0-dev libxkbcommon-dev libssl-dev` — install once
+  via apt on a fresh box.
+
+Don't ship a feature that works on Windows but doesn't compile on
+Linux. The cross-platform check (or at minimum a `cargo check`
+Linux-side) belongs in every sprint that touches build config.
+
 ## Commit hygiene
 
 Commit work in coherent logical units as you finish them — don't let

@@ -186,3 +186,83 @@ as tasks are dispatched from `agent-tasks.md`. Persists across sprints.
   `integration-tests.md`, `e2e-tests.md`, `test-report.md`
   authored under `sprints/s2/sprint-tests/`. Acceptance criteria
   all satisfied.
+
+- **s2 polish** (2026-05-20) — panel headers renamed to canonical
+  terminology after user feedback: "olibs" → "Oovra Library
+  Directories (Olibs)", "atoms" → "Library Components", central
+  panel leads with "Component Editor". Default window 720×480 →
+  960×600 so three columns breathe. No behavior changes.
+
+---
+
+## Sprint s3 — Live autocompose canvas
+
+### GUI
+
+- **G3.1** (2026-05-20) — Added `egui_dnd = "0.15"` to
+  `gui/Cargo.toml`. egui_dnd 0.15.0 declares `egui ^0.34.0` so it
+  composes cleanly with our existing 0.34.x line.
+- **G3.2** (2026-05-20) — Created `gui/src/canvas.rs` with
+  `CanvasState { order, output_id, status }` and methods
+  `toggle / contains / live_preview / save_as_compound` over the
+  existing `oovra::render` surface. Four unit tests in the same
+  file: toggle idempotency, live preview equals direct
+  `render_text`, save-as-compound round-trip, and missing-id
+  surfaces `ElementNotFound`.
+- **G3.3** (2026-05-20) — Extended `OovraApp` with `canvas:
+  CanvasState`, a `CentralView { Editor, Canvas }` enum, and
+  `view: CentralView`. All `#[serde(skip)]` so the canvas is a
+  workbench, not a project document.
+- **G3.4** (2026-05-20) — Library Components list gained a
+  per-row checkbox: click on checkbox toggles canvas inclusion,
+  click on the rest of the row opens the editor (independent
+  click targets).
+- **G3.5–G3.6** (2026-05-20) — Central panel gained a tab row
+  (Editor / Canvas) under the "Component Editor" heading. The
+  Canvas view renders a drag-reorderable list via
+  `egui_dnd::dnd(ui, "...").show_vec(&mut canvas.order, ...)`,
+  a live `render_text` preview in a read-only monospace
+  multi-line TextEdit (re-rendered every frame), and a
+  save-as-compound form with an output-id field + button.
+- **G3.7** (2026-05-20) — `handle_canvas_save` reloads the
+  active olib after a successful save so the new compound
+  appears in Library Components without a manual reload.
+
+### Test Phase
+
+- **T3.1** (2026-05-20) — `cargo test -p oovra` 64 PASS (no lib
+  regressions despite the canvas integration).
+- **T3.2** (2026-05-20) — `cargo test -p oovra-gui` **10 PASS**
+  (s2's 6 + s3's 4 new canvas tests).
+- **T3.3** (2026-05-20) — `cargo build --target
+  wasm32-unknown-unknown -p oovra-gui` PASS in 12.12s. egui_dnd
+  + its transitive `egui_animation` both compile cleanly for
+  wasm32.
+- **T3.4** (2026-05-20) — `cargo run -p oovra-gui` background;
+  s3 layout active. Window confirmed at PID 64700.
+- **clippy fix** (2026-05-20) — added
+  `#![allow(clippy::result_large_err)]` to `gui/src/lib.rs` to
+  mirror the root crate's existing suppression for the same
+  `OovraError`-is-large reason.
+
+### Cross-platform check (mid-sprint user feedback)
+
+- **WSL bootstrap** (2026-05-20) — Installed stable Rust
+  (`cargo 1.95.0 / rustc 1.95.0`) into the WSL Ubuntu image via
+  rustup with `--profile minimal`.
+- **Linux build** (2026-05-20) — `cargo build -p oovra` Linux-side
+  via WSL with `CARGO_TARGET_DIR=/tmp/oovra-linux-target` PASS in
+  13.70s.
+- **Linux test** (2026-05-20) — Full `cargo test -p oovra` on
+  Ubuntu via the same WSL invocation: **24 integration tests
+  PASS**, lib + main unit tests PASS, exit 0.
+- **Project policy** (2026-05-20) — `oovra/CLAUDE.md` updated
+  with a "Cross-platform requirement" section codifying the
+  Ubuntu + WSL workflow. Memory entry
+  `feedback-oovra-cross-platform-and-wsl` added.
+
+### Sprint s3 close
+
+- Sprint-tests docs authored. Acceptance criteria met. Window
+  left up for visual review. Roadmap next: s4 — diff/versioning
+  view.

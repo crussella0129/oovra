@@ -10,7 +10,5 @@ sprints and reflects the work currently in flight.
 
 ## (empty — between sprints)
 
-Sprint s2 is closed. The roadmap for s3+ lives at
-[`/sprints/roadmap.md`](../sprints/roadmap.md). The next sprint to
-arm is whichever roadmap entry the agent picks up next (or whichever
-the user redirects to).
+Sprint s3 is closed. Next pickup per `/sprints/roadmap.md`: **s4 —
+diff / versioning view**.

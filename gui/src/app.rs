@@ -15,7 +15,16 @@ use std::path::{Path, PathBuf};
 
 use oovra::header::{is_kebab_case, slugify};
 
+use crate::canvas::CanvasState;
 use crate::editor::{Editor, OpenResult};
+
+/// Which view is active in the central panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum CentralView {
+    #[default]
+    Editor,
+    Canvas,
+}
 
 /// Application state. Persisted across runs via eframe's persistence
 /// feature, keyed by [`eframe::APP_KEY`]. Only the lightweight
@@ -56,6 +65,13 @@ pub struct OovraApp {
     #[serde(skip)]
     compound_msg: Option<String>,
 
+    /// Working set for the autocompose canvas (sprint s3).
+    #[serde(skip)]
+    canvas: CanvasState,
+    /// Which tab is showing in the central panel.
+    #[serde(skip)]
+    view: CentralView,
+
     /// One-line status / error string surfaced under the toolbar.
     #[serde(skip)]
     status: String,
@@ -84,6 +100,8 @@ impl Default for OovraApp {
             selected_atom: None,
             editor: None,
             compound_msg: None,
+            canvas: CanvasState::new(),
+            view: CentralView::Editor,
             status: String::new(),
         }
     }
@@ -203,7 +221,8 @@ impl OovraApp {
             ui.weak("(no olib selected — pick one on the left)");
             return;
         }
-        // Snapshot for the borrow.
+        // Snapshot for the borrow — owned so we can mutate self
+        // while iterating.
         let entries: Vec<(String, oovra::PromptElementKind)> = self
             .atom_index
             .iter()
@@ -211,17 +230,131 @@ impl OovraApp {
             .collect();
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (i, (id, kind)) in entries.into_iter().enumerate() {
-                let is_sel = self.selected_atom == Some(i);
-                let glyph = match kind {
-                    oovra::PromptElementKind::Atom => "·",
-                    oovra::PromptElementKind::Compound => "▣",
-                };
-                let label = format!("{glyph}  {id}");
-                if ui.selectable_label(is_sel, label).clicked() {
-                    self.select_atom(i);
-                }
+                ui.horizontal(|ui| {
+                    // Per-row checkbox: toggles canvas inclusion
+                    // independently of which row is open in the editor.
+                    let mut included = self.canvas.contains(&id);
+                    if ui.checkbox(&mut included, "").changed() {
+                        self.canvas.toggle(&id);
+                    }
+                    let is_sel = self.selected_atom == Some(i);
+                    let glyph = match kind {
+                        oovra::PromptElementKind::Atom => "·",
+                        oovra::PromptElementKind::Compound => "▣",
+                    };
+                    let label = format!("{glyph}  {id}");
+                    if ui.selectable_label(is_sel, label).clicked() {
+                        self.select_atom(i);
+                    }
+                });
             }
         });
+    }
+
+    /// Render the autocompose canvas: ordered (drag-reorderable) list
+    /// of selected components, live render_text preview, and a
+    /// save-as-compound form.
+    fn render_canvas(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "Canvas — {} component(s) selected",
+            self.canvas.order.len()
+        ));
+        ui.add_space(4.0);
+
+        if self.canvas.order.is_empty() {
+            ui.weak(
+                "Check Library Components in the middle column to add \
+                 them to the canvas.",
+            );
+            return;
+        }
+
+        ui.label("Order (drag ≡ to rearrange):");
+        egui_dnd::dnd(ui, "canvas_list").show_vec(
+            &mut self.canvas.order,
+            |ui, id, handle, _state| {
+                ui.horizontal(|ui| {
+                    handle.ui(ui, |ui| {
+                        ui.label("≡");
+                    });
+                    ui.label(format!("· {id}"));
+                });
+            },
+        );
+
+        ui.separator();
+        ui.label("Live preview:");
+        let mut preview = match &self.loaded {
+            Some(lib) => self
+                .canvas
+                .live_preview(lib)
+                .unwrap_or_else(|e| format!("preview error: {e}")),
+            None => "(no olib loaded — select one to preview)".to_owned(),
+        };
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut preview)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(10)
+                        .font(egui::TextStyle::Monospace)
+                        .interactive(false),
+                );
+            });
+
+        ui.separator();
+        ui.label("Save as compound into the active olib:");
+        ui.horizontal(|ui| {
+            ui.label("output id:");
+            ui.text_edit_singleline(&mut self.canvas.output_id);
+        });
+
+        let can_save = self.loaded.is_some()
+            && !self.canvas.order.is_empty()
+            && !self.canvas.output_id.trim().is_empty();
+        let mut save_clicked = false;
+        if ui
+            .add_enabled(can_save, egui::Button::new("Save into active olib"))
+            .clicked()
+        {
+            save_clicked = true;
+        }
+        if !self.canvas.status.is_empty() {
+            ui.weak(&self.canvas.status);
+        }
+
+        // Handle the save outside the borrow-heavy reads above so the
+        // post-save library refresh has clean mutable access to self.
+        if save_clicked {
+            self.handle_canvas_save();
+        }
+    }
+
+    /// Compose the current canvas into a compound and write it into
+    /// the active olib. Refresh the loaded library on success so the
+    /// new compound appears in the Library Components column.
+    fn handle_canvas_save(&mut self) {
+        let Some(idx) = self.selected_olib else {
+            return;
+        };
+        let Some(olib_dir) = self.discovered.get(idx).map(|d| d.path.clone()) else {
+            return;
+        };
+        let save_result = match &self.loaded {
+            Some(lib) => self.canvas.save_as_compound(lib, &olib_dir),
+            None => return,
+        };
+        match save_result {
+            Ok(path) => {
+                self.canvas.status = format!("Saved {}", path.display());
+                self.status = self.canvas.status.clone();
+                self.load_selected_olib(idx, &olib_dir);
+            }
+            Err(e) => {
+                self.canvas.status = format!("Save failed: {e}");
+            }
+        }
     }
 
     fn render_editor(&mut self, ui: &mut egui::Ui) {
@@ -383,12 +516,20 @@ impl eframe::App for OovraApp {
                 self.render_atom_list(ui);
             });
 
-        // Central: the Component Editor.
+        // Central: the Component Editor (with Editor / Canvas tabs).
         egui::CentralPanel::default().show_inside(ui, |ui| {
             ui.heading("Component Editor");
             ui.weak(format!("oovra-gui  ·  linked to oovra v{}", oovra::VERSION));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.view, CentralView::Editor, "Editor");
+                ui.selectable_value(&mut self.view, CentralView::Canvas, "Canvas");
+            });
             ui.separator();
-            self.render_editor(ui);
+            match self.view {
+                CentralView::Editor => self.render_editor(ui),
+                CentralView::Canvas => self.render_canvas(ui),
+            }
         });
     }
 }

@@ -16,6 +16,7 @@ path = "src/main.rs"
 oovra = { path = ".." }
 egui = "0.34"
 eframe = { version = "0.34", features = ["persistence"] }
+egui_dnd = "0.15"
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 
