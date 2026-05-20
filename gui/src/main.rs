@@ -15,8 +15,8 @@ fn main() -> eframe::Result {
 
     let native_options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 480.0])
-            .with_min_inner_size([480.0, 320.0])
+            .with_inner_size([960.0, 600.0])
+            .with_min_inner_size([720.0, 400.0])
             .with_title("oovra-gui"),
         ..Default::default()
     };

@@ -200,7 +200,7 @@ impl OovraApp {
 
     fn render_atom_list(&mut self, ui: &mut egui::Ui) {
         if self.atom_index.is_empty() {
-            ui.weak("(no library loaded — select an olib in the sidebar)");
+            ui.weak("(no olib selected — pick one on the left)");
             return;
         }
         // Snapshot for the borrow.
@@ -227,7 +227,8 @@ impl OovraApp {
     fn render_editor(&mut self, ui: &mut egui::Ui) {
         // Three states: editor loaded; compound (read-only msg); nothing.
         if let Some(ed) = &mut self.editor {
-            ui.heading("editor");
+            // The central panel already carries the "Component Editor"
+            // heading; no inner heading needed here.
             ui.add_space(2.0);
             egui::Grid::new("editor_fields")
                 .num_columns(2)
@@ -286,14 +287,19 @@ impl OovraApp {
             return;
         }
         if let Some(msg) = &self.compound_msg {
-            ui.heading("compound — read-only");
+            ui.label(egui::RichText::new("compound — read-only").strong());
             ui.add_space(4.0);
             ui.weak(msg);
             ui.add_space(8.0);
-            ui.weak("Editing compounds is a future sprint; for now, edit the recipe by re-composing from the CLI.");
+            ui.weak(
+                "Editing compounds is a future sprint; for now, edit \
+                 the recipe by re-composing from the CLI.",
+            );
             return;
         }
-        ui.weak("Select an atom in the middle column to open it in the editor.");
+        ui.weak(
+            "Select a library component in the middle column to open it in the Component Editor.",
+        );
     }
 }
 
@@ -348,12 +354,15 @@ impl eframe::App for OovraApp {
             });
         });
 
-        // Left sidebar: discovered olibs
+        // Left sidebar: discovered olibs under the opened folder.
+        // Label is the user-facing canonical: an Olib is a folder
+        // literally named `olib`, and discovery recurses into the
+        // opened folder.
         egui::SidePanel::left("olibs")
             .resizable(true)
-            .default_width(220.0)
+            .default_width(280.0)
             .show_inside(ui, |ui| {
-                ui.heading("olibs");
+                ui.heading("Oovra Library Directories (Olibs)");
                 ui.separator();
                 if self.discovered.is_empty() {
                     ui.weak("(open a folder to discover olibs)");
@@ -362,22 +371,22 @@ impl eframe::App for OovraApp {
                 }
             });
 
-        // Second left sidebar: atoms in the selected olib
-        egui::SidePanel::left("atoms")
+        // Second left sidebar: the contents of the selected olib —
+        // both atoms and compounds are "library components" (anything
+        // in the oovra format that `compose` operates on).
+        egui::SidePanel::left("components")
             .resizable(true)
-            .default_width(220.0)
+            .default_width(240.0)
             .show_inside(ui, |ui| {
-                ui.heading("atoms");
+                ui.heading("Library Components");
                 ui.separator();
                 self.render_atom_list(ui);
             });
 
-        // Central: the editor (or hint)
+        // Central: the Component Editor.
         egui::CentralPanel::default().show_inside(ui, |ui| {
-            ui.label(format!(
-                "oovra-gui — sprint s2  ·  linked to oovra v{}",
-                oovra::VERSION
-            ));
+            ui.heading("Component Editor");
+            ui.weak(format!("oovra-gui  ·  linked to oovra v{}", oovra::VERSION));
             ui.separator();
             self.render_editor(ui);
         });
