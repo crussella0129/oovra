@@ -55,6 +55,9 @@ enum Command {
     /// Discover olib directories under a filesystem root
     Discover(DiscoverArgs),
 
+    /// Inspect a single prompt element file (read-only)
+    Inspect(InspectArgs),
+
     /// Migrate a v0.1 library to v0.2 schema in place
     Migrate(MigrateArgs),
 }
@@ -178,6 +181,16 @@ struct DiscoverArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct InspectArgs {
+    /// Path to the prompt-element file (atom or compound)
+    path: PathBuf,
+
+    /// Output format: human (default) or json
+    #[arg(long, default_value = "human")]
+    format: String,
+}
+
+#[derive(clap::Args, Debug)]
 struct MigrateArgs {
     /// Library directory to migrate in place. Recursive. Run in a clean
     /// Git working directory so the diff is auditable.
@@ -193,6 +206,7 @@ fn main() -> anyhow::Result<()> {
         Command::Decompose(args) => run_decompose(args, opts),
         Command::Compare(args) => run_compare(args, opts),
         Command::Discover(args) => run_discover(args),
+        Command::Inspect(args) => run_inspect(args, opts),
         Command::Migrate(args) => run_migrate(args),
     }
 }
@@ -775,6 +789,74 @@ fn run_discover(args: DiscoverArgs) -> anyhow::Result<()> {
         }
     }
     println!("{} olib(s) found.", results.len());
+    Ok(())
+}
+
+fn run_inspect(args: InspectArgs, opts: ParseOptions) -> anyhow::Result<()> {
+    let element = parse_file_with(&args.path, opts)
+        .with_context(|| format!("reading {}", args.path.display()))?;
+
+    let body_lines = if element.body.is_empty() {
+        0
+    } else {
+        element.body.lines().count()
+    };
+    let body_chars = element.body.chars().count();
+
+    if args.format == "json" {
+        // Flatten header into the top-level JSON object and add
+        // body summary fields. One line, easy for agents to pipe.
+        let report = serde_json::json!({
+            "name":         element.header.name,
+            "kind":         element.header.kind,
+            "id":           element.header.id,
+            "version":      element.header.version,
+            "meta":         element.header.meta,
+            "generated_at": element.header.generated_at,
+            "render_mode":  element.header.render_mode,
+            "body_level":   element.header.body_level,
+            "depth":        element.header.depth,
+            "composed_of":  element.header.composed_of,
+            "body_lines":   body_lines,
+            "body_chars":   body_chars,
+        });
+        println!("{}", serde_json::to_string(&report)?);
+        return Ok(());
+    }
+
+    // Human format
+    println!("{} {}", "Inspect".bold(), args.path.display());
+    println!("  {:9} {}", "id".dimmed(), element.header.id);
+    println!("  {:9} {}", "name".dimmed(), element.header.name);
+    println!("  {:9} {:?}", "kind".dimmed(), element.header.kind);
+    println!("  {:9} {}", "version".dimmed(), element.header.version);
+    if !element.header.meta.is_empty() {
+        println!("  {:9} {}", "meta".dimmed(), element.header.meta);
+    }
+    if let Some(gen_at) = &element.header.generated_at {
+        println!("  {:9} {}", "generated".dimmed(), gen_at);
+    }
+    if let Some(rm) = &element.header.render_mode {
+        println!("  {:9} {}", "render".dimmed(), rm);
+    }
+    if let Some(bl) = element.header.body_level {
+        println!("  {:9} {}", "body_lvl".dimmed(), bl);
+    }
+    if let Some(depth) = element.header.depth {
+        println!("  {:9} {}", "depth".dimmed(), depth);
+    }
+    if let Some(inputs) = &element.header.composed_of {
+        println!("  {:9} {} input(s)", "recipe".dimmed(), inputs.len());
+        for i in inputs {
+            println!("    - {} @ {}", i.id.cyan(), i.version.dimmed());
+        }
+    }
+    println!(
+        "  {:9} {} line(s), {} chars",
+        "body".dimmed(),
+        body_lines,
+        body_chars
+    );
     Ok(())
 }
 

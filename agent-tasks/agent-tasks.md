@@ -10,7 +10,7 @@ sprints and reflects the work currently in flight.
 
 ## (empty — between sprints)
 
-Sprint s1 is closed. Sprint s2 (embedded oovra-particle editor) is
-the next pickup; its tasks will be populated from
-`sprints/s2/sprint-plans/build-plan.md` once that file is written
-in the s2 Plan Phase.
+Sprint s2 is closed. The roadmap for s3+ lives at
+[`/sprints/roadmap.md`](../sprints/roadmap.md). The next sprint to
+arm is whichever roadmap entry the agent picks up next (or whichever
+the user redirects to).

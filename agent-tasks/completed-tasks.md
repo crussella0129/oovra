@@ -133,3 +133,56 @@ as tasks are dispatched from `agent-tasks.md`. Persists across sprints.
 - **Sprint s1 close** (2026-05-20) — `unit-tests.md`,
   `integration-tests.md`, `e2e-tests.md`, `test-report.md`
   authored. Acceptance criteria all satisfied.
+
+---
+
+## Sprint s2 — Embedded oovra-particle editor + inspect CLI
+
+### CLI
+
+- **C2.1–C2.3** (2026-05-20) — Added `Command::Inspect(InspectArgs)`
+  + `run_inspect` to `src/main.rs`. Subcommand:
+  `oovra inspect <file> [--format human|json]`. Human format shows
+  header field-by-field (id / name / kind / version / meta plus
+  any compound-only fields) and a body line/char count. JSON
+  flattens the header and adds body summary fields. CLI reinstalled
+  via `cargo install --path .`.
+
+### GUI
+
+- **G2.1** (2026-05-20) — Added `gui/src/editor.rs` with `Editor`
+  struct, `OpenResult` enum, and `Editor::open` / `Editor::save` /
+  `Editor::reload`. Three unit tests in the same file (round-trip
+  edit, compound rejection, invalid-semver rejection).
+- **G2.2** (2026-05-20) — Extended `OovraApp` state: added
+  `atom_index`, `selected_atom`, `editor`, `compound_msg`, with
+  `#[serde(skip)]` on all the heavy bits.
+- **G2.3–G2.6** (2026-05-20) — Rewrote `app.rs::ui` for the
+  3-column layout: top toolbar, two stacked left SidePanels
+  (olibs / atoms), CentralPanel (editor view), bottom collapsing
+  s0 probe panel. Selecting an atom calls `Editor::open`; the
+  editor renders id (read-only), name / version / meta single-line
+  TextEdits, body multi-line monospaced TextEdit, plus Save / Reload
+  buttons with the dirty-flag-driven `Save *` label.
+- **G2.7** (2026-05-20) — Removed `version`/`meta` from `AtomEntry`
+  after a clippy dead_code warning surfaced the over-fit; the
+  atom list now only needs `id`, `kind`, `path`. Atom details
+  reach the user via the editor panel instead.
+
+### Test Phase
+
+- **T2.1** (2026-05-20) — `cargo test -p oovra` 64 PASS (unchanged
+  from s1; s2 added no lib code).
+- **T2.2** (2026-05-20) — `cargo test -p oovra-gui` **6 PASS**
+  (s1's 3 + s2's 3 editor tests).
+- **T2.3** (2026-05-20) — `cargo build --target
+  wasm32-unknown-unknown -p oovra-gui` PASS.
+- **T2.4** (2026-05-20) — `oovra inspect` CLI smoke against the
+  demo tree atoms — human, json, and missing-file error path all
+  behave correctly.
+- **T2.5** (2026-05-20) — `cargo run -p oovra-gui` background;
+  window up PID 61476, title `oovra-gui`. s2 layout active.
+- **Sprint s2 close** (2026-05-20) — `unit-tests.md`,
+  `integration-tests.md`, `e2e-tests.md`, `test-report.md`
+  authored under `sprints/s2/sprint-tests/`. Acceptance criteria
+  all satisfied.

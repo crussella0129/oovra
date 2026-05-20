@@ -8,4 +8,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 mod app;
+mod editor;
 pub use app::OovraApp;
+pub use editor::{Editor, OpenResult};
