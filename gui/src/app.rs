@@ -283,17 +283,24 @@ impl OovraApp {
             ui.weak("(depth limit reached)");
             return;
         }
-        // Cascade leaves still derive from the *underlying* library
-        // (not the deduped display tree) so a compound's checkbox
-        // reflects every leaf in its real recipe, even those whose
-        // display nodes were suppressed elsewhere.
-        let leaves: Vec<String> = match node.kind {
-            oovra::PromptElementKind::Atom => vec![node.id.clone()],
-            oovra::PromptElementKind::Compound => self
-                .loaded
-                .as_ref()
-                .map(|lib| lib.leaf_atoms(&node.id))
-                .unwrap_or_default(),
+        // Pull cascade leaves + the header tags (version / meta) for
+        // this node in one scoped borrow of self.loaded. Cascade
+        // leaves derive from the *underlying* library (not the
+        // deduped display tree) so a compound's checkbox reflects
+        // every leaf in its real recipe.
+        let (leaves, version, meta): (Vec<String>, String, String) = {
+            let lib = self.loaded.as_ref();
+            let leaves = match node.kind {
+                oovra::PromptElementKind::Atom => vec![node.id.clone()],
+                oovra::PromptElementKind::Compound => {
+                    lib.map(|l| l.leaf_atoms(&node.id)).unwrap_or_default()
+                }
+            };
+            let (version, meta) = lib
+                .and_then(|l| l.get(&node.id))
+                .map(|e| (e.header.version.clone(), e.header.meta.clone()))
+                .unwrap_or_default();
+            (leaves, version, meta)
         };
 
         // Editor-selection highlight: which row matches the open
@@ -316,6 +323,7 @@ impl OovraApp {
                     if ui.selectable_label(is_sel, label).clicked() {
                         self.select_component_by_id(&id);
                     }
+                    tag_labels(ui, &version, &meta);
                 });
             }
             oovra::PromptElementKind::Compound => {
@@ -339,11 +347,14 @@ impl OovraApp {
                     if let Some(open) = pending {
                         header = header.open(Some(open));
                     }
-                    header.show(ui, |ui| {
+                    let resp = header.show(ui, |ui| {
                         for child in &node.children {
                             self.render_component_node(ui, child, depth + 1);
                         }
                     });
+                    // Tags trail the collapsing header on the same row.
+                    let _ = resp;
+                    tag_labels(ui, &version, &meta);
                 });
             }
         }
@@ -1014,6 +1025,25 @@ fn render_diff_report(ui: &mut egui::Ui, report: &DiffReport) {
                 }
             }
         }
+    }
+}
+
+/// Render a component's header tags inline after its tree-row label
+/// — the version, and a truncated meta when present — both dimmed so
+/// they read as metadata rather than primary content. This is the
+/// "see the tags without opening" affordance.
+fn tag_labels(ui: &mut egui::Ui, version: &str, meta: &str) {
+    if !version.is_empty() {
+        ui.weak(format!("v{version}"));
+    }
+    if !meta.is_empty() {
+        let short = if meta.chars().count() > 40 {
+            let head: String = meta.chars().take(40).collect();
+            format!("— {head}…")
+        } else {
+            format!("— {meta}")
+        };
+        ui.weak(short);
     }
 }
 

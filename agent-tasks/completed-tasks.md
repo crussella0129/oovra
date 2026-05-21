@@ -464,3 +464,17 @@ is still on the roadmap.
 - **Sprint s6 close** — docs at `sprints/s6/`. Roadmap next:
   syntax-highlighted editor + markdown preview, WASM filesystem
   shim, compound recipe editing, or cross-olib compare.
+
+---
+
+## Sprint s7 — Inline header tags in the component tree
+
+- **Build** (2026-05-20) — `gui/src/app.rs::render_component_node`
+  reads `version` + `meta` per node and renders them inline via a
+  new `tag_labels(ui, version, meta)` free fn (dimmed `v<version>`
+  + truncated `— <meta>`). Delivers the original-vision item "see
+  the tags from the Oovra header without opening." Display-only.
+- **Test** (2026-05-20) — clippy clean; workspace 104 PASS
+  unchanged; wasm32 PASS; WSL Ubuntu 88 PASS parity; GUI relaunched
+  (PID 66464) showing tags inline.
+- **Sprint s7 close** — docs at `sprints/s7/`.
