@@ -10,8 +10,12 @@ sprints and reflects the work currently in flight.
 
 ## (empty — between sprints)
 
-Sprint s5 is closed. Roadmap-next options:
-- **s6 — egui Panel-alias migration** (clear deprecation
-  `#[allow]`s; low effort).
-- **WASM filesystem shim + Trunk pipeline** (originally roadmap
-  s5; deferred when the user redirected to versioning).
+Sprint s6 (egui Panel-alias migration) is closed; the prior
+correlated-list-items fix also landed. Roadmap-next options:
+- **Syntax-highlighted editor + Markdown preview** (egui_code_editor
+  + egui_commonmark; visible GUI improvement, no external tooling).
+- **WASM filesystem shim + Trunk pipeline** (the web build's
+  missing filesystem layer; needs Trunk + browser testing).
+- **Compound recipe editing** (edit a compound's composed_of in
+  the GUI — deferred since s2).
+- **Cross-olib compare** (deferred since s4).

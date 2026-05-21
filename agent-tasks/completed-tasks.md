@@ -432,3 +432,35 @@ is still on the roadmap.
   Acceptance criteria all satisfied. Window left up. Roadmap
   next: **s6 — egui Panel-alias migration** OR return to **WASM
   filesystem shim** (originally roadmap s5).
+
+- **s5 fix: correlated list items** (2026-05-20) — the cascade
+  polish only deduped at the top level; within-tree diamond dupes
+  (an atom in two compounds of the same DAG) still rendered twice
+  with synchronized checkboxes. Added Library::component_tree()
+  (deduped forest, seen-set, depth-first pre-order from roots) +
+  ComponentNode; gui render_tree_node → render_component_node
+  driving off the deduped tree. Diagnostic + fix + regression
+  unit tests in library.rs. NOTE: the prior build hadn't actually
+  deployed (a running .exe held a file lock so `cargo build
+  --quiet` silently failed); confirmed fresh-build timestamp and
+  relaunched. User confirmed the clean schema.
+
+---
+
+## Sprint s6 — egui Panel-alias migration
+
+- **Research** (2026-05-20) — confirmed against docs.rs/egui/0.34.2:
+  TopBottomPanel/SidePanel are deprecated aliases for the unified
+  `Panel`; `default_width`/`default_height` deprecated for the
+  orientation-aware `default_size`.
+- **Build** (2026-05-20) — `gui/src/app.rs`: migrated the toolbar,
+  footer, olibs, and components panels to `egui::Panel::{top,
+  bottom,left}`; `default_width` → `default_size`; removed the
+  `#[allow(deprecated)]` on `App::ui`.
+- **Test** (2026-05-20) — clippy clean (deprecation warnings gone);
+  workspace 104 PASS unchanged; wasm32 build PASS (11.24s); WSL
+  Ubuntu 88 PASS parity; GUI relaunched (PID 62244) — three-column
+  layout visually identical.
+- **Sprint s6 close** — docs at `sprints/s6/`. Roadmap next:
+  syntax-highlighted editor + markdown preview, WASM filesystem
+  shim, compound recipe editing, or cross-olib compare.

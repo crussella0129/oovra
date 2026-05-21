@@ -787,12 +787,9 @@ impl eframe::App for OovraApp {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    // egui 0.34.2 panel-alias deprecations are tracked for a follow-up
-    // migration sprint; carry the local allow forward unchanged.
-    #[allow(deprecated)]
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Top toolbar
-        egui::TopBottomPanel::top("toolbar").show_inside(ui, |ui| {
+        egui::Panel::top("toolbar").show_inside(ui, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Open folder…").clicked() {
                     #[cfg(not(target_arch = "wasm32"))]
@@ -815,7 +812,7 @@ impl eframe::App for OovraApp {
         });
 
         // Bottom: s0 probe in a collapsing section (kept for sprint-over-sprint diff)
-        egui::TopBottomPanel::bottom("footer").show_inside(ui, |ui| {
+        egui::Panel::bottom("footer").show_inside(ui, |ui| {
             ui.collapsing("s0 probe (kebab / slugify)", |ui| {
                 ui.label("Live oovra::header probe — exercising the lib at runtime:");
                 ui.horizontal(|ui| {
@@ -837,9 +834,9 @@ impl eframe::App for OovraApp {
         // Label is the user-facing canonical: an Olib is a folder
         // literally named `olib`, and discovery recurses into the
         // opened folder.
-        egui::SidePanel::left("olibs")
+        egui::Panel::left("olibs")
             .resizable(true)
-            .default_width(280.0)
+            .default_size(280.0)
             .show_inside(ui, |ui| {
                 ui.heading("Oovra Library Directories (Olibs)");
                 ui.separator();
@@ -853,9 +850,9 @@ impl eframe::App for OovraApp {
         // Second left sidebar: the contents of the selected olib —
         // both atoms and compounds are "library components" (anything
         // in the oovra format that `compose` operates on).
-        egui::SidePanel::left("components")
+        egui::Panel::left("components")
             .resizable(true)
-            .default_width(260.0)
+            .default_size(260.0)
             .show_inside(ui, |ui| {
                 ui.heading("Library Components");
                 ui.horizontal(|ui| {
